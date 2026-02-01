@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+venv
+.env
+
+# Node
+web/node_modules
+web/.env.development
+
+# Downloads and outputs
+downloads/*
+transcripts/*
+!downloads/.gitkeep
+!transcripts/.gitkeep
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store

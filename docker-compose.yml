@@ -1,0 +1,33 @@
+services:
+  # 後端 API 服務
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yt-transcripter-backend
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./downloads:/app/downloads
+      - ./transcripts:/app/transcripts
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 前端服務 (含 nginx 反向代理)
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: yt-transcripter-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
