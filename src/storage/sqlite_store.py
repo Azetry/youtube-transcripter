@@ -168,6 +168,74 @@ class SQLiteStore:
             return None
         return self._row_to_job(row)
 
+    # ── Chunk persistence ─────────────────────────────────────
+
+    def insert_chunks(self, job_id: str, chunks: list[dict]) -> None:
+        """Persist chunk metadata for a job.
+
+        Args:
+            job_id: The parent job ID.
+            chunks: List of dicts with keys: chunk_index, start_time,
+                    end_time, duration, audio_path (optional).
+        """
+        with self._lock:
+            self._conn.executemany(
+                """INSERT INTO job_chunks
+                   (job_id, chunk_index, start_time, end_time, duration, audio_path, status)
+                   VALUES (?, ?, ?, ?, ?, ?, 'planned')""",
+                [
+                    (
+                        job_id,
+                        c["chunk_index"],
+                        c["start_time"],
+                        c["end_time"],
+                        c["duration"],
+                        c.get("audio_path"),
+                    )
+                    for c in chunks
+                ],
+            )
+            self._conn.commit()
+
+    def get_chunks(self, job_id: str) -> list[dict]:
+        """Retrieve all chunks for a job, ordered by index."""
+        cur = self._conn.execute(
+            """SELECT * FROM job_chunks
+               WHERE job_id = ?
+               ORDER BY chunk_index""",
+            (job_id,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def update_chunk_status(
+        self,
+        job_id: str,
+        chunk_index: int,
+        status: str,
+        transcript_path: Optional[str] = None,
+        corrected_path: Optional[str] = None,
+    ) -> None:
+        """Update a chunk's processing status and optional artifact paths."""
+        with self._lock:
+            fields = ["status = ?"]
+            params: list = [status]
+
+            if transcript_path is not None:
+                fields.append("transcript_path = ?")
+                params.append(transcript_path)
+            if corrected_path is not None:
+                fields.append("corrected_path = ?")
+                params.append(corrected_path)
+
+            params.extend([job_id, chunk_index])
+            self._conn.execute(
+                f"""UPDATE job_chunks
+                    SET {', '.join(fields)}
+                    WHERE job_id = ? AND chunk_index = ?""",
+                params,
+            )
+            self._conn.commit()
+
     # ── Helpers ───────────────────────────────────────────────
 
     @staticmethod

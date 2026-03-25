@@ -7,7 +7,7 @@ transcription job persistence layer.
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Default database location (relative to project root)
 DEFAULT_DB_PATH = "data/transcripter.db"
@@ -52,6 +52,22 @@ CREATE TABLE IF NOT EXISTS job_results (
     diff_inline TEXT NOT NULL DEFAULT '',
     processed_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS job_chunks (
+    job_id TEXT NOT NULL REFERENCES jobs(job_id),
+    chunk_index INTEGER NOT NULL,
+    start_time REAL NOT NULL,
+    end_time REAL NOT NULL,
+    duration REAL NOT NULL,
+    audio_path TEXT,
+    transcript_path TEXT,
+    corrected_path TEXT,
+    status TEXT NOT NULL DEFAULT 'planned',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (job_id, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_chunks_job_id ON job_chunks(job_id);
 """
 
 
@@ -71,7 +87,7 @@ def bootstrap(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     # Apply schema
     conn.executescript(SCHEMA_SQL)
 
-    # Track version if not yet recorded
+    # Track version and apply migrations
     cur = conn.execute("SELECT COUNT(*) FROM schema_version")
     if cur.fetchone()[0] == 0:
         conn.execute(
@@ -79,5 +95,16 @@ def bootstrap(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
             (SCHEMA_VERSION,),
         )
         conn.commit()
+    else:
+        cur = conn.execute(
+            "SELECT MAX(version) FROM schema_version"
+        )
+        current_version = cur.fetchone()[0]
+        if current_version < SCHEMA_VERSION:
+            conn.execute(
+                "INSERT INTO schema_version (version) VALUES (?)",
+                (SCHEMA_VERSION,),
+            )
+            conn.commit()
 
     return conn
