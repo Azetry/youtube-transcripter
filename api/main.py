@@ -25,6 +25,8 @@ from src.diff_viewer import DiffViewer
 from src.models.job import JobStatus
 from src.services.transcription_service import TranscriptionService
 from src.services.job_service import JobService
+from src.storage.schema import bootstrap
+from src.storage.sqlite_store import SQLiteStore
 
 
 # ============== Pydantic Models ==============
@@ -77,10 +79,12 @@ class TaskStatusResponse(BaseModel):
 
 # ============== Shared Services ==============
 
-job_service = JobService()
+_db_conn = bootstrap()
+_store = SQLiteStore(_db_conn)
+job_service = JobService(store=_store)
 transcription_service = TranscriptionService()
 
-# Store results keyed by job_id (in-memory, mirrors old `tasks` dict behavior)
+# In-memory result cache for active session (supplement to DB persistence)
 _task_results: dict[str, TranscribeResponse] = {}
 
 
@@ -115,19 +119,21 @@ async def process_transcription(job_id: str):
         )
 
         # Store result
-        _task_results[job_id] = TranscribeResponse(
-            video_id=artifacts.video_info.video_id,
-            title=artifacts.video_info.title,
-            channel=artifacts.video_info.channel,
-            duration=artifacts.video_info.duration,
-            original_text=artifacts.original_text,
-            corrected_text=artifacts.corrected_text,
-            language=artifacts.language,
-            similarity_ratio=artifacts.similarity_ratio,
-            change_count=artifacts.change_count,
-            diff_inline=artifacts.diff_inline,
-            processed_at=datetime.now().isoformat(),
-        )
+        result_data = {
+            "video_id": artifacts.video_info.video_id,
+            "title": artifacts.video_info.title,
+            "channel": artifacts.video_info.channel,
+            "duration": artifacts.video_info.duration,
+            "original_text": artifacts.original_text,
+            "corrected_text": artifacts.corrected_text,
+            "language": artifacts.language,
+            "similarity_ratio": artifacts.similarity_ratio,
+            "change_count": artifacts.change_count,
+            "diff_inline": artifacts.diff_inline,
+            "processed_at": datetime.now().isoformat(),
+        }
+        _task_results[job_id] = TranscribeResponse(**result_data)
+        job_service.store_result(job_id, result_data)
 
         job_service.complete_job(job_id)
 
@@ -226,12 +232,22 @@ async def get_task_status(task_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="任務不存在")
 
+    # Try in-memory cache first, then fall back to persisted result
+    result = _task_results.get(task_id)
+    if result is None and job.status == JobStatus.COMPLETED:
+        db_result = job_service.get_result(task_id)
+        if db_result:
+            # Remove non-column keys if present (e.g. job_id from row)
+            db_result.pop("job_id", None)
+            result = TranscribeResponse(**db_result)
+            _task_results[task_id] = result  # warm the cache
+
     return TaskStatusResponse(
         task_id=job.job_id,
         status=job.status.value,
         progress=job.progress,
         message=job.message,
-        result=_task_results.get(task_id),
+        result=result,
     )
 
 
