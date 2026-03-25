@@ -12,6 +12,7 @@ class JobStatus(str, Enum):
     DOWNLOADING = "downloading"
     TRANSCRIBING = "transcribing"
     CORRECTING = "correcting"
+    MERGING = "merging"
     COMPLETED = "completed"
     FAILED = "failed"
 

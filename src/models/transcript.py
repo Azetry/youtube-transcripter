@@ -20,3 +20,10 @@ class TranscriptArtifacts:
     change_count: int = 0
     diff_inline: str = ""
     saved_files: Optional[dict[str, str]] = None
+
+    # Merge metadata (populated only for long-video chunked pipeline)
+    is_merged: bool = False
+    chunk_count: int = 0
+    segments_before_dedup: int = 0
+    segments_after_dedup: int = 0
+    consistency_text: str = ""

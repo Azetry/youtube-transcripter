@@ -116,6 +116,7 @@ async def process_transcription(job_id: str):
             skip_correction=job.skip_correction,
             custom_terms=job.custom_terms,
             on_progress=on_progress,
+            job_id=job_id,
         )
 
         # Store result
@@ -134,6 +135,16 @@ async def process_transcription(job_id: str):
         }
         _task_results[job_id] = TranscribeResponse(**result_data)
         job_service.store_result(job_id, result_data)
+
+        # Persist merge metadata for long-video jobs
+        if artifacts.is_merged:
+            job_service.store_merge_fields(job_id, {
+                "is_merged": 1,
+                "chunk_count": artifacts.chunk_count,
+                "segments_before_dedup": artifacts.segments_before_dedup,
+                "segments_after_dedup": artifacts.segments_after_dedup,
+                "consistency_text": artifacts.consistency_text,
+            })
 
         job_service.complete_job(job_id)
 

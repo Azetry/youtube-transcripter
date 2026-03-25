@@ -113,6 +113,11 @@ class JobService:
             return self._store.get_result(job_id)
         return None
 
+    def store_merge_fields(self, job_id: str, merge_data: dict) -> None:
+        """Persist merge-specific fields on an existing result (no-op without store)."""
+        if self._store:
+            self._store.update_result_merge_fields(job_id, merge_data)
+
     # ── Reuse lookup ──────────────────────────────────────────
 
     def find_reusable_job(
