@@ -22,10 +22,9 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.text import Text
 
-from src.youtube_extractor import YouTubeExtractor
-from src.whisper_transcriber import WhisperTranscriber
-from src.text_corrector import TextCorrector
 from src.diff_viewer import DiffViewer, print_colored_diff
+from src.models.transcript import TranscriptArtifacts
+from src.services.transcription_service import TranscriptionService
 
 # 載入環境變數
 load_dotenv()
@@ -116,86 +115,55 @@ def process_video(
 ) -> None:
     """處理單一影片的完整流程"""
 
-    extractor = YouTubeExtractor(output_dir=download_dir)
-    transcriber = WhisperTranscriber()
-    corrector = TextCorrector()
-    diff_viewer = DiffViewer()
+    service = TranscriptionService(
+        download_dir=download_dir,
+        output_dir=output_dir,
+    )
 
     # 1. 驗證網址
-    if not extractor.is_valid_youtube_url(url):
+    if not service.validate_url(url):
         console.print("[red]錯誤：無效的 YouTube 網址[/red]")
         return
 
-    # 2. 擷取影片資訊並下載音訊
+    # 2. 執行轉錄管線（透過共用服務層）
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        # 下載音訊
-        task = progress.add_task("下載影片音訊...", total=None)
-        video_info = extractor.download_audio(url)
-        progress.update(task, completed=True)
+        current_task = progress.add_task("處理中...", total=None)
 
-    console.print()
-    display_video_info(video_info)
-    console.print()
+        def on_progress(status, pct, message):
+            progress.update(current_task, description=message)
 
-    # 3. Whisper 轉錄
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Whisper 轉錄中...", total=None)
-        transcript_result = transcriber.transcribe(
-            video_info.audio_file,
+        artifacts = service.run(
+            url=url,
             language=language,
-            prompt=video_info.title,  # 使用標題作為提示
+            skip_correction=skip_correction,
+            custom_terms=custom_terms,
+            on_progress=on_progress,
         )
-        progress.update(task, completed=True)
 
-    console.print(f"[green]偵測語言: {transcript_result.language}[/green]")
+    # 3. 顯示影片資訊
+    console.print()
+    display_video_info(artifacts.video_info)
     console.print()
 
-    original_text = transcript_result.text
+    console.print(f"[green]偵測語言: {artifacts.language}[/green]")
+    console.print()
 
-    # 4. 校正（如果需要）
-    if skip_correction:
-        corrected_text = original_text
-        console.print("[yellow]跳過校正步驟[/yellow]")
-    else:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("GPT 校正中...", total=None)
-
-            context = f"影片標題：{video_info.title}\n頻道：{video_info.channel}"
-
-            if custom_terms:
-                corrected_text = corrector.correct_with_terms(
-                    original_text,
-                    terms=custom_terms,
-                    context=context,
-                )
-            else:
-                corrected_text = corrector.correct(original_text, context=context)
-
-            progress.update(task, completed=True)
-
-    # 5. 顯示差異
+    # 4. 顯示差異
     if not skip_correction:
-        diff_result = diff_viewer.compare(original_text, corrected_text)
+        diff_viewer = DiffViewer()
+        diff_result = diff_viewer.compare(artifacts.original_text, artifacts.corrected_text)
         console.print()
         print_colored_diff(diff_result)
 
-    # 6. 儲存結果
+    # 5. 儲存結果
     saved_files = save_transcript(
-        video_info,
-        original_text,
-        corrected_text,
+        artifacts.video_info,
+        artifacts.original_text,
+        artifacts.corrected_text,
         output_dir=output_dir,
     )
 
@@ -208,11 +176,6 @@ def process_video(
         title="已儲存檔案",
         border_style="green",
     ))
-
-    # 7. 清理暫存音訊（可選）
-    if os.path.exists(video_info.audio_file):
-        os.remove(video_info.audio_file)
-        console.print(f"[dim]已清理暫存音訊: {video_info.audio_file}[/dim]")
 
 
 def interactive_mode() -> None:

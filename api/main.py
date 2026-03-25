@@ -3,7 +3,6 @@ FastAPI Backend - YouTube Transcripter API
 """
 
 import os
-import json
 import asyncio
 from datetime import datetime
 from typing import Optional
@@ -11,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # 載入環境變數
@@ -21,10 +20,11 @@ load_dotenv()
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.youtube_extractor import YouTubeExtractor, VideoInfo
-from src.whisper_transcriber import WhisperTranscriber
-from src.text_corrector import TextCorrector
+from src.youtube_extractor import YouTubeExtractor
 from src.diff_viewer import DiffViewer
+from src.models.job import JobStatus
+from src.services.transcription_service import TranscriptionService
+from src.services.job_service import JobService
 
 
 # ============== Pydantic Models ==============
@@ -67,18 +67,21 @@ class TranscribeResponse(BaseModel):
     processed_at: str
 
 
-class TaskStatus(BaseModel):
+class TaskStatusResponse(BaseModel):
     task_id: str
-    status: str  # pending, processing, completed, failed
+    status: str  # pending, downloading, transcribing, correcting, completed, failed
     progress: int  # 0-100
     message: str
     result: Optional[TranscribeResponse] = None
 
 
-# ============== 全域狀態 ==============
+# ============== Shared Services ==============
 
-# 任務狀態儲存 (實際應用建議用 Redis)
-tasks: dict[str, TaskStatus] = {}
+job_service = JobService()
+transcription_service = TranscriptionService()
+
+# Store results keyed by job_id (in-memory, mirrors old `tasks` dict behavior)
+_task_results: dict[str, TranscribeResponse] = {}
 
 
 # ============== Helper Functions ==============
@@ -92,92 +95,44 @@ def format_duration(seconds: int) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-async def process_transcription(
-    task_id: str,
-    url: str,
-    language: Optional[str],
-    skip_correction: bool,
-    custom_terms: Optional[list[str]],
-):
+async def process_transcription(job_id: str):
     """背景處理轉錄任務"""
+    job = job_service.get_job(job_id)
+    if not job:
+        return
+
     try:
-        tasks[task_id].status = "processing"
-        tasks[task_id].progress = 10
-        tasks[task_id].message = "下載影片音訊中..."
+        def on_progress(status: JobStatus, pct: int, msg: str):
+            job_service.update_job(job_id, status, pct, msg)
 
-        # 1. 下載音訊
-        extractor = YouTubeExtractor(output_dir="./downloads")
-        video_info = await asyncio.to_thread(extractor.download_audio, url)
-
-        tasks[task_id].progress = 40
-        tasks[task_id].message = "Whisper 轉錄中..."
-
-        # 2. Whisper 轉錄
-        transcriber = WhisperTranscriber()
-        transcript_result = await asyncio.to_thread(
-            transcriber.transcribe,
-            video_info.audio_file,
-            language,
-            video_info.title,
+        artifacts = await asyncio.to_thread(
+            transcription_service.run,
+            url=job.url,
+            language=job.language,
+            skip_correction=job.skip_correction,
+            custom_terms=job.custom_terms,
+            on_progress=on_progress,
         )
 
-        original_text = transcript_result.text
-        tasks[task_id].progress = 70
-        tasks[task_id].message = "GPT 校正中..."
-
-        # 3. 校正
-        if skip_correction:
-            corrected_text = original_text
-        else:
-            corrector = TextCorrector()
-            context = f"影片標題：{video_info.title}\n頻道：{video_info.channel}"
-
-            if custom_terms:
-                corrected_text = await asyncio.to_thread(
-                    corrector.correct_with_terms,
-                    original_text,
-                    custom_terms,
-                    context,
-                )
-            else:
-                corrected_text = await asyncio.to_thread(
-                    corrector.correct,
-                    original_text,
-                    context,
-                )
-
-        tasks[task_id].progress = 90
-        tasks[task_id].message = "產生差異比較..."
-
-        # 4. 差異比較
-        diff_viewer = DiffViewer()
-        diff_result = diff_viewer.compare(original_text, corrected_text)
-
-        # 5. 清理暫存檔案
-        if os.path.exists(video_info.audio_file):
-            os.remove(video_info.audio_file)
-
-        # 6. 完成
-        tasks[task_id].progress = 100
-        tasks[task_id].status = "completed"
-        tasks[task_id].message = "處理完成"
-        tasks[task_id].result = TranscribeResponse(
-            video_id=video_info.video_id,
-            title=video_info.title,
-            channel=video_info.channel,
-            duration=video_info.duration,
-            original_text=original_text,
-            corrected_text=corrected_text,
-            language=transcript_result.language,
-            similarity_ratio=diff_result.similarity_ratio,
-            change_count=diff_result.change_count,
-            diff_inline=diff_viewer.get_inline_diff(original_text, corrected_text),
+        # Store result
+        _task_results[job_id] = TranscribeResponse(
+            video_id=artifacts.video_info.video_id,
+            title=artifacts.video_info.title,
+            channel=artifacts.video_info.channel,
+            duration=artifacts.video_info.duration,
+            original_text=artifacts.original_text,
+            corrected_text=artifacts.corrected_text,
+            language=artifacts.language,
+            similarity_ratio=artifacts.similarity_ratio,
+            change_count=artifacts.change_count,
+            diff_inline=artifacts.diff_inline,
             processed_at=datetime.now().isoformat(),
         )
 
+        job_service.complete_job(job_id)
+
     except Exception as e:
-        tasks[task_id].status = "failed"
-        tasks[task_id].message = f"錯誤: {str(e)}"
+        job_service.fail_job(job_id, str(e))
 
 
 # ============== FastAPI App ==============
@@ -247,45 +202,43 @@ async def start_transcription(
     background_tasks: BackgroundTasks,
 ):
     """開始轉錄任務（背景處理）"""
-    extractor = YouTubeExtractor()
-
-    if not extractor.is_valid_youtube_url(request.url):
+    if not transcription_service.validate_url(request.url):
         raise HTTPException(status_code=400, detail="無效的 YouTube 網址")
 
-    # 建立任務
-    task_id = f"task_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-    tasks[task_id] = TaskStatus(
-        task_id=task_id,
-        status="pending",
-        progress=0,
-        message="任務已建立，等待處理...",
+    # 建立任務 (via shared job service)
+    job = job_service.create_job(
+        url=request.url,
+        language=request.language,
+        skip_correction=request.skip_correction,
+        custom_terms=request.custom_terms,
     )
 
     # 加入背景任務
-    background_tasks.add_task(
-        process_transcription,
-        task_id,
-        request.url,
-        request.language,
-        request.skip_correction,
-        request.custom_terms,
-    )
+    background_tasks.add_task(process_transcription, job.job_id)
 
-    return {"task_id": task_id, "message": "任務已開始"}
+    return {"task_id": job.job_id, "message": "任務已開始"}
 
 
-@app.get("/api/task/{task_id}", response_model=TaskStatus)
+@app.get("/api/task/{task_id}", response_model=TaskStatusResponse)
 async def get_task_status(task_id: str):
     """取得任務狀態"""
-    if task_id not in tasks:
+    job = job_service.get_job(task_id)
+    if not job:
         raise HTTPException(status_code=404, detail="任務不存在")
 
-    return tasks[task_id]
+    return TaskStatusResponse(
+        task_id=job.job_id,
+        status=job.status.value,
+        progress=job.progress,
+        message=job.message,
+        result=_task_results.get(task_id),
+    )
 
 
 @app.post("/api/correct")
 async def correct_text(text: str, context: Optional[str] = None):
     """單獨校正文字"""
+    from src.text_corrector import TextCorrector
     corrector = TextCorrector()
     corrected = await asyncio.to_thread(corrector.correct, text, context)
 

@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 複製應用程式碼
 COPY src/ ./src/
 COPY api/ ./api/
+COPY tests/ ./tests/
 
 # 建立下載和輸出目錄
 RUN mkdir -p downloads transcripts
