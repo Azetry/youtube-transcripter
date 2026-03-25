@@ -7,7 +7,7 @@ transcription job persistence layer.
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Default database location (relative to project root)
 DEFAULT_DB_PATH = "data/transcripter.db"
@@ -50,7 +50,16 @@ CREATE TABLE IF NOT EXISTS job_results (
     similarity_ratio REAL NOT NULL DEFAULT 0.0,
     change_count INTEGER NOT NULL DEFAULT 0,
     diff_inline TEXT NOT NULL DEFAULT '',
-    processed_at TEXT NOT NULL
+    processed_at TEXT NOT NULL,
+    -- Merge-specific fields (NULL for single-chunk jobs)
+    is_merged INTEGER NOT NULL DEFAULT 0,
+    chunk_count INTEGER NOT NULL DEFAULT 1,
+    merged_segments TEXT,      -- JSON array of {start, end, text} segments
+    merged_raw_path TEXT,      -- file path to merged raw transcript
+    merged_corrected_path TEXT,-- file path to merged corrected transcript
+    consistency_text TEXT,     -- text after final consistency pass
+    segments_before_dedup INTEGER,
+    segments_after_dedup INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS job_chunks (
@@ -101,6 +110,7 @@ def bootstrap(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
         )
         current_version = cur.fetchone()[0]
         if current_version < SCHEMA_VERSION:
+            _apply_migrations(conn, current_version)
             conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?)",
                 (SCHEMA_VERSION,),
@@ -108,3 +118,27 @@ def bootstrap(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
             conn.commit()
 
     return conn
+
+
+def _apply_migrations(conn: sqlite3.Connection, from_version: int) -> None:
+    """Apply incremental schema migrations."""
+    if from_version < 3:
+        # Add merge-specific columns to job_results (v3)
+        _add_column_if_missing(conn, "job_results", "is_merged", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "job_results", "chunk_count", "INTEGER NOT NULL DEFAULT 1")
+        _add_column_if_missing(conn, "job_results", "merged_segments", "TEXT")
+        _add_column_if_missing(conn, "job_results", "merged_raw_path", "TEXT")
+        _add_column_if_missing(conn, "job_results", "merged_corrected_path", "TEXT")
+        _add_column_if_missing(conn, "job_results", "consistency_text", "TEXT")
+        _add_column_if_missing(conn, "job_results", "segments_before_dedup", "INTEGER")
+        _add_column_if_missing(conn, "job_results", "segments_after_dedup", "INTEGER")
+
+
+def _add_column_if_missing(
+    conn: sqlite3.Connection, table: str, column: str, col_type: str
+) -> None:
+    """Add a column to a table if it does not already exist."""
+    cur = conn.execute(f"PRAGMA table_info({table})")
+    existing = {row[1] for row in cur.fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")

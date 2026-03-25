@@ -236,6 +236,41 @@ class SQLiteStore:
             )
             self._conn.commit()
 
+    # ── Merge result persistence ─────────────────────────────
+
+    def update_result_merge_fields(self, job_id: str, merge_data: dict) -> None:
+        """Persist merge-specific fields on an existing job_result row.
+
+        Args:
+            job_id: The job this result belongs to.
+            merge_data: Dict with optional keys: is_merged, chunk_count,
+                merged_segments (JSON string), merged_raw_path,
+                merged_corrected_path, consistency_text,
+                segments_before_dedup, segments_after_dedup.
+        """
+        allowed = {
+            "is_merged", "chunk_count", "merged_segments",
+            "merged_raw_path", "merged_corrected_path", "consistency_text",
+            "segments_before_dedup", "segments_after_dedup",
+        }
+        fields = []
+        params: list = []
+        for key, val in merge_data.items():
+            if key in allowed:
+                fields.append(f"{key} = ?")
+                params.append(val)
+
+        if not fields:
+            return
+
+        params.append(job_id)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE job_results SET {', '.join(fields)} WHERE job_id = ?",
+                params,
+            )
+            self._conn.commit()
+
     # ── Helpers ───────────────────────────────────────────────
 
     @staticmethod

@@ -48,7 +48,7 @@ class TestSchemaV2:
     def test_schema_version_is_2(self, conn):
         cur = conn.execute("SELECT MAX(version) FROM schema_version")
         assert cur.fetchone()[0] == SCHEMA_VERSION
-        assert SCHEMA_VERSION == 2
+        assert SCHEMA_VERSION == 3
 
 
 class TestChunkCRUD:
