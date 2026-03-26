@@ -28,11 +28,49 @@ class YouTubeExtractor:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
+    @staticmethod
+    def _build_auth_opts() -> dict:
+        """Build yt-dlp authentication options from environment variables.
+
+        Supported env vars (all optional — when absent, no auth is used):
+          YT_DLP_COOKIES_FILE        – path to a Netscape-format cookies.txt
+          YT_DLP_COOKIES_FROM_BROWSER – browser name for cookie extraction,
+                                        e.g. "chrome", "firefox", "brave"
+          YT_DLP_BROWSER_PROFILE     – browser profile name (used with
+                                        cookies-from-browser)
+          YT_DLP_BROWSER_CONTAINER   – browser container/keyring hint
+
+        If both COOKIES_FILE and COOKIES_FROM_BROWSER are set, COOKIES_FILE
+        takes precedence (yt-dlp only accepts one).
+        """
+        opts: dict = {}
+
+        cookies_file = os.environ.get("YT_DLP_COOKIES_FILE")
+        cookies_browser = os.environ.get("YT_DLP_COOKIES_FROM_BROWSER")
+
+        if cookies_file:
+            opts["cookiefile"] = cookies_file
+        elif cookies_browser:
+            # yt-dlp format: "browser:profile:container"
+            browser_spec = cookies_browser
+            profile = os.environ.get("YT_DLP_BROWSER_PROFILE")
+            container = os.environ.get("YT_DLP_BROWSER_CONTAINER")
+            if profile:
+                browser_spec += f":{profile}"
+                if container:
+                    browser_spec += f":{container}"
+            elif container:
+                browser_spec += f"::{container}"
+            opts["cookiesfrombrowser"] = (browser_spec,)
+
+        return opts
+
     def extract_info(self, url: str) -> VideoInfo:
         """僅擷取影片資訊（不下載）"""
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
+            **self._build_auth_opts(),
         }
 
         with YoutubeDL(ydl_opts) as ydl:
@@ -69,6 +107,7 @@ class YouTubeExtractor:
             'outtmpl': f'{self.output_dir}/%(id)s.%(ext)s',
             'quiet': False,
             'no_warnings': False,
+            **self._build_auth_opts(),
         }
 
         with YoutubeDL(ydl_opts) as ydl:
