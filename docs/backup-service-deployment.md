@@ -1,0 +1,154 @@
+# Backup Service Deployment & Acceptance
+
+This document explains how to deploy and validate the A/B backup-service delegation flow for `youtube-transcripter`.
+
+## Overview
+
+### A host (primary)
+Responsibilities:
+- try local YouTube acquisition/transcription first
+- if local acquisition fails and fallback policy says delegate, call B over internal HTTP
+- consume B's final result and relay it to the caller
+
+### B host (backup)
+Responsibilities:
+- expose internal backup endpoints
+- validate bearer token
+- run the full `youtube-transcripter` pipeline locally
+- return final delegated result
+
+## Required endpoints on B
+- `GET /delegate/health`
+- `POST /delegate/transcribe`
+
+## Recommended deployment model
+- Keep A and B on the same internal network
+- Use the same repo version/commit on both hosts
+- Use a shared bearer token
+- Do not expose the backup endpoint publicly in the first version
+
+## Environment variables
+
+### A host
+Required:
+- `BACKUP_SERVICE_URL=http://<B_HOST>:8000`
+- `BACKUP_SERVICE_TOKEN=<shared-secret>`
+- `OPENAI_API_KEY=...`
+
+Optional / existing extraction envs:
+- `YT_DLP_COOKIES_FILE=...`
+- `YT_DLP_COOKIES_FROM_BROWSER=...`
+- `YT_DLP_BROWSER_PROFILE=...`
+- `YT_DLP_BROWSER_CONTAINER=...`
+
+### B host
+Required:
+- `BACKUP_SERVICE_TOKEN=<shared-secret>`
+- `OPENAI_API_KEY=...`
+
+Optional / recommended if B is expected to succeed where A fails:
+- `YT_DLP_COOKIES_FILE=/path/to/cookies.txt`
+- or `YT_DLP_COOKIES_FROM_BROWSER=chrome`
+
+## Deployment steps
+
+### 1. Align repo version
+Use the same commit on both hosts.
+
+Recommended practice:
+- push validated commits to remote first
+- on both A and B:
+  - `git fetch origin`
+  - `git checkout <commit-sha>`
+
+### 2. Start B service
+Ensure the FastAPI backend is reachable on the internal network and the delegation endpoints are active.
+
+Example:
+```bash
+# on B
+export BACKUP_SERVICE_TOKEN=... 
+export OPENAI_API_KEY=...
+# plus any YouTube auth env you want B to use
+
+docker compose up -d backend
+```
+
+### 3. Configure A
+```bash
+# on A
+export BACKUP_SERVICE_URL=http://<B_HOST>:8000
+export BACKUP_SERVICE_TOKEN=...
+export OPENAI_API_KEY=...
+```
+
+## Acceptance sequence
+
+### Phase 0 — Health check
+From A, verify B is reachable:
+
+```bash
+curl http://<B_HOST>:8000/delegate/health
+```
+
+Expected response includes:
+- `healthy`
+- `auth_configured`
+- `openai_configured`
+
+### Phase 1 — Direct delegated request to B
+Manually POST a delegated request to B:
+
+```bash
+curl -X POST http://<B_HOST>:8000/delegate/transcribe \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://www.youtube.com/watch?v=<VIDEO_ID>",
+    "language": "en",
+    "skip_correction": true,
+    "originator": "acceptance-a",
+    "delegation_reason": "manual acceptance test"
+  }'
+```
+
+Expected:
+- success → `status=success`, `delegated=true`, `result` present
+- failure → `status=failed`, classified `failure_category`, `error_message`
+
+### Phase 2 — A-side client test
+On A, verify the backup client can call B successfully using the configured URL and token.
+
+### Phase 3 — Local-fail → remote-success
+Create a scenario where:
+- A fails locally (e.g. no valid YouTube cookies / blocked path)
+- B is configured to succeed
+
+Expected:
+1. A attempts local acquisition
+2. H3 policy chooses delegation
+3. A calls B
+4. B returns final result
+5. A returns that delegated result instead of a raw local acquisition failure
+
+## Pass/fail checklist
+
+### PASS
+- [ ] B `/delegate/health` is reachable from A
+- [ ] B `/delegate/transcribe` works directly
+- [ ] A backup client can call B successfully
+- [ ] Local-fail → remote-success works end-to-end
+- [ ] Final transcript result is returned to the caller
+
+### FAIL
+- [ ] A cannot reach B
+- [ ] bearer token mismatch
+- [ ] B itself cannot extract YouTube
+- [ ] A never enters delegate branch
+- [ ] delegated response cannot be parsed/consumed
+
+## Operational notes
+- Use the same validated commit on both A and B for acceptance.
+- Prefer `skip_correction=true` for the first acceptance run to reduce variables/cost.
+- If B is also blocked by YouTube, the issue is now environmental on both hosts, not an A-side fallback bug.
+- Keep `docs/acquisition-runbook.md` as the reasoning/diagnostics companion to this deployment guide.

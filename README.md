@@ -12,6 +12,8 @@ A powerful YouTube video transcription tool that integrates OpenAI Whisper API f
 - **Diff Comparison** - Visual diff view between original and corrected transcripts
 - **Dual Interface** - Both CLI and Web interface available
 - **Docker Deployment** - One-click deployment with Docker Compose
+- **Long-video Pipeline** - Chunking, merge/dedupe, and long-video transcript processing support
+- **Acquisition Hardening** - Structured acquisition diagnostics, fallback policy, and backup-service delegation foundation
 
 ## Architecture
 
@@ -84,6 +86,18 @@ python main.py --help
 | `/api/video/info` | POST | Get video information |
 | `/api/transcribe` | POST | Start transcription task |
 | `/api/task/{id}` | GET | Get task status |
+| `/delegate/health` | GET | Backup-service health check |
+| `/delegate/transcribe` | POST | Backup-service delegated transcription |
+
+## Documentation
+
+- Acquisition reasoning / failure classes / fallback logic:
+  - `docs/acquisition-runbook.md`
+- A/B backup-service deployment and acceptance guide:
+  - `docs/backup-service-deployment.md`
+- Active OpenSpec changes:
+  - `openspec/changes/upgrade-transcription-pipeline/`
+  - `openspec/changes/harden-youtube-acquisition/`
 
 ## Tech Stack
 
@@ -107,12 +121,25 @@ python main.py --help
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `OPENAI_API_KEY` | OpenAI API key | Yes |
+| `BACKUP_SERVICE_URL` | Backup-service base URL for A→B delegation | No |
+| `BACKUP_SERVICE_TOKEN` | Shared bearer token for backup-service delegation | No |
+| `YT_DLP_COOKIES_FILE` | Netscape-format cookies file for authenticated extraction | No |
+| `YT_DLP_COOKIES_FROM_BROWSER` | Browser name for cookie extraction | No |
+
+## Current Project State
+
+This repo now contains two major implementation tracks:
+1. upgraded long-video transcript pipeline
+2. YouTube acquisition hardening + backup-service fallback MVP
+
+OpenSpec changes remain active until final reconciliation/archive.
 
 ## Limitations
 
 - Whisper API has a 25MB file size limit; audio quality is set to 64kbps to comply
 - Transcription quality depends on audio clarity and Whisper model capabilities
 - GPT corrections may alter original meaning; manual review is recommended
+- YouTube acquisition reliability may still vary by host/network/IP reputation; see the acquisition runbook and backup-service deployment guide
 
 ## License
 
