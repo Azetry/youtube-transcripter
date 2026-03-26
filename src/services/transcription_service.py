@@ -12,7 +12,10 @@ Unit H5: acquisition is now an explicit phase before transcript
 processing.  The service delegates to ThisHostAcquisitionService (H2),
 consults the fallback policy (H3), and produces an alternate-host
 handoff request (H4 contract) when local acquisition is exhausted.
-Actual remote transport is NOT implemented here.
+
+Unit H7c: when H3 routes to DELEGATE_ALTERNATE_HOST and a backup
+service is configured, the orchestrator calls the B-side via the
+backup client and returns the remote result directly.
 """
 
 import logging
@@ -42,6 +45,15 @@ from src.services.fallback_policy import (
 from src.integrations.alternate_host import (
     AlternateHostRequest,
     build_request_from_decision,
+)
+from src.integrations.backup_client import (
+    BackupClientError,
+    delegate_transcription,
+    is_delegation_available,
+)
+from src.integrations.backup_service import (
+    DelegationRequest,
+    DelegationResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +99,9 @@ class AcquisitionOutcome:
     continues.  On failure, ``fallback_decision`` and optionally
     ``alternate_host_request`` describe what the orchestrator recommends
     as the next step (but does not execute).
+
+    When ``delegated`` is True, the full transcription was completed by
+    the backup service — ``delegation_response`` contains the result.
     """
     video_info: Optional[VideoInfo] = None
     success: bool = False
@@ -94,6 +109,8 @@ class AcquisitionOutcome:
     fallback_decision: Optional[FallbackDecision] = None
     alternate_host_request: Optional[AlternateHostRequest] = None
     diagnostics: dict = field(default_factory=dict)
+    delegated: bool = False
+    delegation_response: Optional[DelegationResponse] = None
 
 
 class TranscriptionService:
@@ -168,7 +185,13 @@ class TranscriptionService:
 
         # 1. Acquire audio via structured acquisition service (H2)
         progress(JobStatus.DOWNLOADING, 5, "音訊取得中...")
-        outcome = self._acquire(url, progress)
+        outcome = self._acquire(
+            url, progress,
+            language=language,
+            skip_correction=skip_correction,
+            custom_terms=custom_terms,
+            job_id=job_id,
+        )
 
         if not outcome.success:
             raise AcquisitionError(
@@ -179,6 +202,11 @@ class TranscriptionService:
                 fallback_decision=outcome.fallback_decision,
                 alternate_host_request=outcome.alternate_host_request,
             )
+
+        # H7c: if the backup service handled the full pipeline, return
+        # its result directly — no local transcription needed.
+        if outcome.delegated and outcome.delegation_response:
+            return self._build_delegated_artifacts(outcome.delegation_response)
 
         video_info = outcome.video_info
         chunk_files_to_clean: list[str] = []
@@ -377,13 +405,18 @@ class TranscriptionService:
         self,
         url: str,
         progress: Callable,
+        *,
+        language: Optional[str] = None,
+        skip_correction: bool = False,
+        custom_terms: Optional[list[str]] = None,
+        job_id: Optional[str] = None,
     ) -> AcquisitionOutcome:
         """Run the structured acquisition phase.
 
         1. Try this-host strategies via H2 ThisHostAcquisitionService.
         2. On failure, consult H3 fallback policy.
-        3. If policy says DELEGATE_ALTERNATE_HOST, build H4 request
-           (actual transport is out of scope).
+        3. If policy says DELEGATE_ALTERNATE_HOST and backup is configured,
+           call the B-side via H7c backup client.
         4. For local-retry routes (RETRY / ESCALATE / WAIT), do NOT
            re-attempt here — surface the decision so the caller or a
            future retry loop can act on it.
@@ -416,7 +449,7 @@ class TranscriptionService:
         )
 
         if decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST:
-            # Build H4 handoff request (transport NOT executed)
+            # Build H4 handoff request (kept for diagnostics/audit)
             request = build_request_from_decision(
                 url,
                 failure_category=decision.failure_category,
@@ -426,13 +459,112 @@ class TranscriptionService:
                 originator=self._originator,
             )
             outcome.alternate_host_request = request
-            logger.info(
-                "Alternate-host handoff request prepared for %s (originator=%s).",
-                url,
-                self._originator,
-            )
+
+            # H7c: attempt actual delegation via backup client
+            if is_delegation_available():
+                progress(JobStatus.DOWNLOADING, 9, "本機失敗，委派至備援服務...")
+                delegation_outcome = self._try_delegate(
+                    url, decision, acq_result, progress,
+                    language=language,
+                    skip_correction=skip_correction,
+                    custom_terms=custom_terms,
+                    job_id=job_id,
+                )
+                if delegation_outcome is not None:
+                    return delegation_outcome
+                # Delegation failed — fall through with the original outcome
+                logger.warning("Backup delegation failed; returning local failure.")
+            else:
+                logger.info(
+                    "Alternate-host handoff request prepared for %s "
+                    "(originator=%s) but backup client not configured.",
+                    url,
+                    self._originator,
+                )
 
         return outcome
+
+    def _try_delegate(
+        self,
+        url: str,
+        decision: FallbackDecision,
+        acq_result: AcquisitionResult,
+        progress: Callable,
+        *,
+        language: Optional[str] = None,
+        skip_correction: bool = False,
+        custom_terms: Optional[list[str]] = None,
+        job_id: Optional[str] = None,
+    ) -> Optional[AcquisitionOutcome]:
+        """Attempt to delegate the full pipeline to the backup service.
+
+        Returns a successful AcquisitionOutcome with ``delegated=True``
+        on success, or None if the remote call fails.
+        """
+        diag_summary = str(acq_result.diagnostics()) if acq_result else None
+
+        delegation_req = DelegationRequest(
+            url=url,
+            language=language,
+            skip_correction=skip_correction,
+            custom_terms=tuple(custom_terms) if custom_terms else (),
+            originator=self._originator,
+            delegation_reason=decision.reason,
+            acquisition_failure_context=diag_summary,
+            job_id=job_id,
+        )
+
+        try:
+            resp = delegate_transcription(delegation_req)
+        except BackupClientError as exc:
+            logger.warning("Backup client error: %s", exc)
+            return None
+
+        if not resp.success:
+            logger.warning(
+                "Backup service returned failure: %s (category=%s)",
+                resp.error_message,
+                resp.failure_category,
+            )
+            return None
+
+        progress(JobStatus.DOWNLOADING, 10, "備援服務轉錄完成")
+        logger.info(
+            "Delegation succeeded via %s for %s",
+            resp.remote_host,
+            url,
+        )
+
+        return AcquisitionOutcome(
+            success=True,
+            acquisition_result=acq_result,
+            fallback_decision=decision,
+            diagnostics=acq_result.diagnostics() if acq_result else {},
+            delegated=True,
+            delegation_response=resp,
+        )
+
+    @staticmethod
+    def _build_delegated_artifacts(resp: DelegationResponse) -> TranscriptArtifacts:
+        """Convert a successful DelegationResponse into TranscriptArtifacts."""
+        result = resp.result
+        video_info = VideoInfo(
+            video_id=result.video_id,
+            title=result.title,
+            description="",
+            duration=result.duration,
+            upload_date="",
+            channel=result.channel,
+            channel_id="",
+            view_count=0,
+            thumbnail_url="",
+        )
+        return TranscriptArtifacts(
+            video_info=video_info,
+            original_text=result.original_text,
+            corrected_text=result.corrected_text,
+            language=result.language,
+        )
 
     def acquire_only(self, url: str) -> AcquisitionOutcome:
         """Run acquisition phase without continuing to transcription.
