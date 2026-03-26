@@ -17,7 +17,7 @@ from src.media.chunker import DEFAULT_CHUNK_DURATION
 from src.models.job import JobStatus
 from src.models.transcript import TranscriptArtifacts
 from src.services.job_service import JobService
-from src.services.transcription_service import TranscriptionService
+from src.services.transcription_service import AcquisitionOutcome, TranscriptionService
 from src.storage.schema import bootstrap
 from src.storage.sqlite_store import SQLiteStore
 from src.youtube_extractor import VideoInfo
@@ -85,7 +85,7 @@ class TestShortVideoPipeline:
 
         progress_calls = []
 
-        with patch.object(svc.extractor, "download_audio", return_value=video_info), \
+        with patch.object(svc, "_acquire", return_value=AcquisitionOutcome(video_info=video_info, success=True)), \
              patch.object(svc.transcriber, "transcribe", return_value=mock_transcript), \
              patch.object(svc.corrector, "correct", return_value="This is the corrected transcript text."):
 
@@ -119,7 +119,7 @@ class TestShortVideoPipeline:
         mock_transcript.language = "zh"
         mock_transcript.duration = 200
 
-        with patch.object(svc.extractor, "download_audio", return_value=video_info), \
+        with patch.object(svc, "_acquire", return_value=AcquisitionOutcome(video_info=video_info, success=True)), \
              patch.object(svc.transcriber, "transcribe", return_value=mock_transcript) as mock_t, \
              patch.object(svc.corrector, "correct") as mock_c:
 
@@ -145,7 +145,7 @@ class TestShortVideoPipeline:
         mock_transcript.language = "en"
         mock_transcript.duration = 200
 
-        with patch.object(svc.extractor, "download_audio", return_value=video_info), \
+        with patch.object(svc, "_acquire", return_value=AcquisitionOutcome(video_info=video_info, success=True)), \
              patch.object(svc.transcriber, "transcribe", return_value=mock_transcript), \
              patch.object(svc.corrector, "correct_with_terms", return_value="Corrected.") as mock_ct:
 
@@ -247,7 +247,7 @@ class TestLongVideoPipeline:
 
         progress_calls = []
 
-        with patch.object(svc.extractor, "download_audio", return_value=video_info), \
+        with patch.object(svc, "_acquire", return_value=AcquisitionOutcome(video_info=video_info, success=True)), \
              patch("src.services.transcription_service.generate_chunk_files", mock_generate_chunks), \
              patch.object(svc.transcriber, "transcribe_with_timestamps", side_effect=mock_transcribe_with_timestamps), \
              patch.object(svc.corrector, "correct", side_effect=mock_correct):
@@ -309,7 +309,7 @@ class TestLongVideoPipeline:
                 artifacts.append(ChunkArtifact(index=i, start_time=s, end_time=e, file_path=p))
             return artifacts
 
-        with patch.object(svc.extractor, "download_audio", return_value=video_info), \
+        with patch.object(svc, "_acquire", return_value=AcquisitionOutcome(video_info=video_info, success=True)), \
              patch("src.services.transcription_service.generate_chunk_files", mock_gen_chunks), \
              patch.object(svc.transcriber, "transcribe_with_timestamps", side_effect=mock_transcribe_ts), \
              patch.object(svc.corrector, "correct") as mock_c:
@@ -427,7 +427,7 @@ class TestCleanup:
         mock_t.language = "en"
         mock_t.duration = 200
 
-        with patch.object(svc.extractor, "download_audio", return_value=video_info), \
+        with patch.object(svc, "_acquire", return_value=AcquisitionOutcome(video_info=video_info, success=True)), \
              patch.object(svc.transcriber, "transcribe", return_value=mock_t), \
              patch.object(svc.corrector, "correct", return_value="text"):
             svc.run(url="https://www.youtube.com/watch?v=x")
@@ -462,7 +462,7 @@ class TestCleanup:
                 "segments": [{"start": 0, "end": 5, "text": "text"}],
             }
 
-        with patch.object(svc.extractor, "download_audio", return_value=video_info), \
+        with patch.object(svc, "_acquire", return_value=AcquisitionOutcome(video_info=video_info, success=True)), \
              patch("src.services.transcription_service.generate_chunk_files", mock_gen), \
              patch.object(svc.transcriber, "transcribe_with_timestamps", side_effect=mock_ts), \
              patch.object(svc.corrector, "correct", return_value="text"):

@@ -7,9 +7,17 @@ Both entry points now delegate to this single implementation.
 Supports two flows:
   - Short video: single-pass transcribe → correct → diff
   - Long video: chunk → transcribe each → correct each → merge → consistency → diff
+
+Unit H5: acquisition is now an explicit phase before transcript
+processing.  The service delegates to ThisHostAcquisitionService (H2),
+consults the fallback policy (H3), and produces an alternate-host
+handoff request (H4 contract) when local acquisition is exhausted.
+Actual remote transport is NOT implemented here.
 """
 
+import logging
 import os
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from src.youtube_extractor import YouTubeExtractor, VideoInfo
@@ -22,9 +30,70 @@ from src.media.chunker import needs_chunking, generate_chunk_files
 from src.transcript.models import ChunkTranscript, Segment
 from src.transcript.merger import merge_chunks, consistency_pass
 
+from src.services.acquisition_service import (
+    AcquisitionResult,
+    ThisHostAcquisitionService,
+)
+from src.services.fallback_policy import (
+    FallbackDecision,
+    FallbackRoute,
+    decide as decide_fallback,
+)
+from src.integrations.alternate_host import (
+    AlternateHostRequest,
+    build_request_from_decision,
+)
+
+logger = logging.getLogger(__name__)
+
 
 # Type for an optional progress callback: (status, progress%, message)
 ProgressCallback = Callable[[JobStatus, int, str], None]
+
+
+# ---------------------------------------------------------------------------
+# Acquisition-phase result — exposed to callers for diagnostics
+# ---------------------------------------------------------------------------
+
+class AcquisitionError(Exception):
+    """Raised when audio acquisition fails after all local strategies.
+
+    Attributes:
+        acquisition_result: The H2 structured result with attempt history.
+        fallback_decision: The H3 routing decision (if computed).
+        alternate_host_request: The H4 handoff request (if the policy
+            recommended delegating to an alternate host).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        acquisition_result: Optional[AcquisitionResult] = None,
+        fallback_decision: Optional[FallbackDecision] = None,
+        alternate_host_request: Optional[AlternateHostRequest] = None,
+    ) -> None:
+        super().__init__(message)
+        self.acquisition_result = acquisition_result
+        self.fallback_decision = fallback_decision
+        self.alternate_host_request = alternate_host_request
+
+
+@dataclass
+class AcquisitionOutcome:
+    """Structured result of the acquisition phase.
+
+    On success, ``video_info`` is populated and the transcript pipeline
+    continues.  On failure, ``fallback_decision`` and optionally
+    ``alternate_host_request`` describe what the orchestrator recommends
+    as the next step (but does not execute).
+    """
+    video_info: Optional[VideoInfo] = None
+    success: bool = False
+    acquisition_result: Optional[AcquisitionResult] = None
+    fallback_decision: Optional[FallbackDecision] = None
+    alternate_host_request: Optional[AlternateHostRequest] = None
+    diagnostics: dict = field(default_factory=dict)
 
 
 class TranscriptionService:
@@ -51,13 +120,17 @@ class TranscriptionService:
         self,
         download_dir: str = "./downloads",
         output_dir: str = "./transcripts",
+        *,
+        originator: str = "",
     ) -> None:
         self.download_dir = download_dir
         self.output_dir = output_dir
         self.extractor = YouTubeExtractor(output_dir=download_dir)
+        self.acquisition_service = ThisHostAcquisitionService(self.extractor)
         self.transcriber = WhisperTranscriber()
         self.corrector = TextCorrector()
         self.diff_viewer = DiffViewer()
+        self._originator = originator
 
     def validate_url(self, url: str) -> bool:
         """Check if the URL is a valid YouTube URL."""
@@ -93,10 +166,21 @@ class TranscriptionService:
             if on_progress:
                 on_progress(status, pct, msg)
 
-        # 1. Download audio
-        progress(JobStatus.DOWNLOADING, 10, "下載影片音訊中...")
-        video_info = self.extractor.download_audio(url)
+        # 1. Acquire audio via structured acquisition service (H2)
+        progress(JobStatus.DOWNLOADING, 5, "音訊取得中...")
+        outcome = self._acquire(url, progress)
 
+        if not outcome.success:
+            raise AcquisitionError(
+                f"Acquisition failed: {outcome.fallback_decision.reason}"
+                if outcome.fallback_decision
+                else "Acquisition failed with no fallback decision.",
+                acquisition_result=outcome.acquisition_result,
+                fallback_decision=outcome.fallback_decision,
+                alternate_host_request=outcome.alternate_host_request,
+            )
+
+        video_info = outcome.video_info
         chunk_files_to_clean: list[str] = []
         try:
             duration = video_info.duration
@@ -284,6 +368,82 @@ class TranscriptionService:
             segments_after_dedup=merged.segments_after_dedup,
             consistency_text=final_corrected,
         )
+
+    # ------------------------------------------------------------------
+    # Acquisition phase (H5 orchestration glue)
+    # ------------------------------------------------------------------
+
+    def _acquire(
+        self,
+        url: str,
+        progress: Callable,
+    ) -> AcquisitionOutcome:
+        """Run the structured acquisition phase.
+
+        1. Try this-host strategies via H2 ThisHostAcquisitionService.
+        2. On failure, consult H3 fallback policy.
+        3. If policy says DELEGATE_ALTERNATE_HOST, build H4 request
+           (actual transport is out of scope).
+        4. For local-retry routes (RETRY / ESCALATE / WAIT), do NOT
+           re-attempt here — surface the decision so the caller or a
+           future retry loop can act on it.
+        """
+        progress(JobStatus.DOWNLOADING, 8, "嘗試本機取得音訊...")
+        acq_result = self.acquisition_service.acquire(url)
+
+        outcome = AcquisitionOutcome(
+            acquisition_result=acq_result,
+            diagnostics=acq_result.diagnostics(),
+        )
+
+        if acq_result.success:
+            outcome.video_info = acq_result.video_info
+            outcome.success = True
+            logger.info(
+                "Acquisition succeeded locally (%d attempt(s)).",
+                acq_result.strategy_count,
+            )
+            progress(JobStatus.DOWNLOADING, 10, "音訊取得完成")
+            return outcome
+
+        # Local acquisition failed — consult H3 fallback policy
+        decision = decide_fallback(acq_result)
+        outcome.fallback_decision = decision
+        logger.warning(
+            "Local acquisition failed [%s]: %s",
+            decision.route.value,
+            decision.reason,
+        )
+
+        if decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST:
+            # Build H4 handoff request (transport NOT executed)
+            request = build_request_from_decision(
+                url,
+                failure_category=decision.failure_category,
+                exhausted_modes=decision.exhausted_modes,
+                attempt_count=acq_result.strategy_count,
+                reason=decision.reason,
+                originator=self._originator,
+            )
+            outcome.alternate_host_request = request
+            logger.info(
+                "Alternate-host handoff request prepared for %s (originator=%s).",
+                url,
+                self._originator,
+            )
+
+        return outcome
+
+    def acquire_only(self, url: str) -> AcquisitionOutcome:
+        """Run acquisition phase without continuing to transcription.
+
+        Useful for diagnostics, dry-runs, and testing the acquisition
+        pipeline in isolation.
+        """
+        def _noop_progress(_s: JobStatus, _p: int, _m: str) -> None:
+            pass
+
+        return self._acquire(url, _noop_progress)
 
     def _correct_text(
         self,
