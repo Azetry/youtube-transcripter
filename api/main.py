@@ -28,6 +28,8 @@ from src.services.job_service import JobService
 from src.storage.schema import bootstrap
 from src.storage.sqlite_store import SQLiteStore
 
+from api.delegation import router as delegation_router
+
 
 # ============== Pydantic Models ==============
 
@@ -178,6 +180,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(delegation_router)
 
 
 # ============== API Endpoints ==============
