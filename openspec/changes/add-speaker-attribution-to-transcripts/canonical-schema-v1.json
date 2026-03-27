@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "transcript-artifact-speaker-v1",
+  "title": "Speaker-Aware Transcript Artifact (v1)",
+  "description": "Canonical JSON schema for transcript artifacts with optional speaker attribution. When speaker_attribution is false or absent, the speaker_segments field is omitted and the artifact is identical to the pre-attribution format.",
+
+  "type": "object",
+  "required": ["video_id", "title", "channel", "duration", "language", "original_text", "corrected_text"],
+  "properties": {
+    "video_id": { "type": "string" },
+    "title": { "type": "string" },
+    "channel": { "type": "string" },
+    "duration": { "type": "integer", "description": "Video duration in seconds" },
+    "language": { "type": "string" },
+    "original_text": { "type": "string" },
+    "corrected_text": { "type": "string" },
+    "similarity_ratio": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+    "change_count": { "type": "integer", "minimum": 0 },
+    "processed_at": { "type": "string", "format": "date-time" },
+
+    "is_merged": { "type": "boolean", "default": false },
+    "chunk_count": { "type": "integer", "minimum": 0 },
+    "segments_before_dedup": { "type": "integer", "minimum": 0 },
+    "segments_after_dedup": { "type": "integer", "minimum": 0 },
+
+    "speaker_attribution": {
+      "type": "object",
+      "description": "Present only when speaker attribution was requested and performed.",
+      "required": ["enabled", "strategy", "speaker_count"],
+      "properties": {
+        "enabled": { "type": "boolean", "const": true },
+        "strategy": {
+          "type": "string",
+          "description": "Attribution strategy used.",
+          "enum": ["pause_heuristic_v1"]
+        },
+        "strategy_version": { "type": "string", "examples": ["v1"] },
+        "speaker_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of distinct speakers detected."
+        },
+        "speaker_segments": {
+          "type": "array",
+          "description": "Timestamped segments with speaker labels.",
+          "items": {
+            "type": "object",
+            "required": ["start", "end", "text", "speaker"],
+            "properties": {
+              "start": { "type": "number", "description": "Global start time in seconds" },
+              "end": { "type": "number", "description": "Global end time in seconds" },
+              "text": { "type": "string" },
+              "speaker": {
+                "type": "object",
+                "required": ["label", "confidence", "attribution_mode"],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "description": "Generic speaker label.",
+                    "examples": ["Speaker A", "Speaker B", "Speaker C"]
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "description": "Confidence in speaker assignment. 0.0 = no confidence, 1.0 = certain."
+                  },
+                  "attribution_mode": {
+                    "type": "string",
+                    "enum": ["confident", "predicted", "unknown"],
+                    "description": "confident = high-confidence assignment, predicted = heuristic guess, unknown = could not determine speaker."
+                  }
+                }
+              },
+              "chunk_index": {
+                "type": ["integer", "null"],
+                "description": "Source chunk index (null for short videos)."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -7,7 +7,7 @@ transcription job persistence layer.
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Default database location (relative to project root)
 DEFAULT_DB_PATH = "data/transcripter.db"
@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     language TEXT,
     skip_correction INTEGER NOT NULL DEFAULT 0,
     custom_terms TEXT,  -- JSON array stored as text
+    speaker_attribution INTEGER NOT NULL DEFAULT 0,
     -- Input signature for exact-match reuse
     input_signature TEXT
 );
@@ -59,7 +60,12 @@ CREATE TABLE IF NOT EXISTS job_results (
     merged_corrected_path TEXT,-- file path to merged corrected transcript
     consistency_text TEXT,     -- text after final consistency pass
     segments_before_dedup INTEGER,
-    segments_after_dedup INTEGER
+    segments_after_dedup INTEGER,
+    -- Speaker attribution fields (v4)
+    speaker_attribution_enabled INTEGER NOT NULL DEFAULT 0,
+    speaker_strategy TEXT,
+    speaker_count INTEGER,
+    speaker_segments_json TEXT  -- JSON array of speaker-aware segments
 );
 
 CREATE TABLE IF NOT EXISTS job_chunks (
@@ -132,6 +138,14 @@ def _apply_migrations(conn: sqlite3.Connection, from_version: int) -> None:
         _add_column_if_missing(conn, "job_results", "consistency_text", "TEXT")
         _add_column_if_missing(conn, "job_results", "segments_before_dedup", "INTEGER")
         _add_column_if_missing(conn, "job_results", "segments_after_dedup", "INTEGER")
+
+    if from_version < 4:
+        # Add speaker attribution columns (v4)
+        _add_column_if_missing(conn, "jobs", "speaker_attribution", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "job_results", "speaker_attribution_enabled", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "job_results", "speaker_strategy", "TEXT")
+        _add_column_if_missing(conn, "job_results", "speaker_count", "INTEGER")
+        _add_column_if_missing(conn, "job_results", "speaker_segments_json", "TEXT")
 
 
 def _add_column_if_missing(

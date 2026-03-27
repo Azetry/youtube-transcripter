@@ -20,6 +20,7 @@ def compute_input_signature(
     language: Optional[str] = None,
     skip_correction: bool = False,
     custom_terms: Optional[list[str]] = None,
+    speaker_attribution: bool = False,
 ) -> str:
     """Compute a deterministic signature for job inputs.
 
@@ -33,6 +34,7 @@ def compute_input_signature(
         "language": language or "",
         "skip_correction": skip_correction,
         "custom_terms": sorted(custom_terms) if custom_terms else [],
+        "speaker_attribution": speaker_attribution,
     }
     payload = json.dumps(normalized, sort_keys=True, ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

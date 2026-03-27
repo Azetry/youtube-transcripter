@@ -31,7 +31,13 @@ from src.models.transcript import TranscriptArtifacts
 from src.models.job import JobStatus
 from src.media.chunker import needs_chunking, generate_chunk_files
 from src.transcript.models import ChunkTranscript, Segment
-from src.transcript.merger import merge_chunks, consistency_pass
+from src.transcript.merger import merge_chunks, consistency_pass, mark_chunk_boundary_uncertainty
+from src.transcript.speaker_attribution import (
+    STRATEGY_ID as SPEAKER_STRATEGY_ID,
+    attribute_speakers,
+    count_speakers,
+    segments_to_dicts,
+)
 
 from src.services.acquisition_service import (
     AcquisitionResult,
@@ -159,6 +165,7 @@ class TranscriptionService:
         language: Optional[str] = None,
         skip_correction: bool = False,
         custom_terms: Optional[list[str]] = None,
+        speaker_attribution: bool = False,
         on_progress: Optional[ProgressCallback] = None,
         job_id: Optional[str] = None,
     ) -> TranscriptArtifacts:
@@ -219,6 +226,7 @@ class TranscriptionService:
                     language=language,
                     skip_correction=skip_correction,
                     custom_terms=custom_terms,
+                    speaker_attribution=speaker_attribution,
                     progress=progress,
                     job_id=job_id or "tmp",
                     chunk_files_to_clean=chunk_files_to_clean,
@@ -229,6 +237,7 @@ class TranscriptionService:
                     language=language,
                     skip_correction=skip_correction,
                     custom_terms=custom_terms,
+                    speaker_attribution=speaker_attribution,
                     progress=progress,
                 )
 
@@ -247,17 +256,33 @@ class TranscriptionService:
         language: Optional[str],
         skip_correction: bool,
         custom_terms: Optional[list[str]],
+        speaker_attribution: bool,
         progress: Callable,
     ) -> TranscriptArtifacts:
         """Single-pass pipeline for short videos."""
-        # Transcribe
+        # Transcribe — use timestamps when speaker attribution is needed
         progress(JobStatus.TRANSCRIBING, 40, "Whisper 轉錄中...")
-        transcript_result = self.transcriber.transcribe(
-            video_info.audio_file,
-            language=language,
-            prompt=video_info.title,
-        )
-        original_text = transcript_result.text
+        if speaker_attribution:
+            ts_result = self.transcriber.transcribe_with_timestamps(
+                video_info.audio_file,
+                language=language,
+                prompt=video_info.title,
+            )
+            original_text = ts_result["text"]
+            detected_language = ts_result.get("language", "")
+            raw_segments = [
+                Segment(start=s["start"], end=s["end"], text=s["text"])
+                for s in ts_result.get("segments", [])
+            ]
+        else:
+            transcript_result = self.transcriber.transcribe(
+                video_info.audio_file,
+                language=language,
+                prompt=video_info.title,
+            )
+            original_text = transcript_result.text
+            detected_language = transcript_result.language
+            raw_segments = None
 
         # Correct (optional)
         if skip_correction:
@@ -268,6 +293,16 @@ class TranscriptionService:
                 original_text, video_info, custom_terms
             )
 
+        # Speaker attribution (optional)
+        speaker_segments_dicts = None
+        speaker_count = 0
+        speaker_strategy = ""
+        if speaker_attribution and raw_segments:
+            attributed = attribute_speakers(raw_segments)
+            speaker_count = count_speakers(attributed)
+            speaker_strategy = SPEAKER_STRATEGY_ID
+            speaker_segments_dicts = segments_to_dicts(attributed)
+
         # Diff
         progress(JobStatus.COMPLETED, 90, "產生差異比較...")
         diff_result = self.diff_viewer.compare(original_text, corrected_text)
@@ -277,10 +312,14 @@ class TranscriptionService:
             video_info=video_info,
             original_text=original_text,
             corrected_text=corrected_text,
-            language=transcript_result.language,
+            language=detected_language,
             similarity_ratio=diff_result.similarity_ratio,
             change_count=diff_result.change_count,
             diff_inline=diff_inline,
+            speaker_attribution_enabled=speaker_attribution,
+            speaker_strategy=speaker_strategy,
+            speaker_count=speaker_count,
+            speaker_segments=speaker_segments_dicts,
         )
 
     def _run_long_video(
@@ -289,6 +328,7 @@ class TranscriptionService:
         language: Optional[str],
         skip_correction: bool,
         custom_terms: Optional[list[str]],
+        speaker_attribution: bool,
         progress: Callable,
         job_id: str,
         chunk_files_to_clean: list[str],
@@ -337,6 +377,12 @@ class TranscriptionService:
                 for s in ts_result.get("segments", [])
             ]
 
+            # Speaker attribution per chunk (before merge)
+            if speaker_attribution and segments:
+                segments = attribute_speakers(
+                    segments, chunk_index=ca.index
+                )
+
             # Use first chunk's detected language if auto-detecting
             if not detected_language and ts_result.get("language"):
                 detected_language = ts_result["language"]
@@ -369,6 +415,18 @@ class TranscriptionService:
         progress(JobStatus.MERGING, 82, "合併轉錄段落中...")
         merged = merge_chunks(chunk_transcripts)
 
+        # 4b. Mark chunk-boundary speaker uncertainty
+        speaker_segments_dicts = None
+        speaker_count = 0
+        speaker_strategy = ""
+        if speaker_attribution:
+            boundary_marked = mark_chunk_boundary_uncertainty(
+                merged.segments, merged.chunk_count
+            )
+            speaker_count = count_speakers(boundary_marked)
+            speaker_strategy = SPEAKER_STRATEGY_ID
+            speaker_segments_dicts = segments_to_dicts(boundary_marked)
+
         # 5. Consistency pass (skip when correction was skipped so
         #    corrected_text stays identical to the merged raw text)
         if skip_correction:
@@ -395,6 +453,10 @@ class TranscriptionService:
             segments_before_dedup=merged.segments_before_dedup,
             segments_after_dedup=merged.segments_after_dedup,
             consistency_text=final_corrected,
+            speaker_attribution_enabled=speaker_attribution,
+            speaker_strategy=speaker_strategy,
+            speaker_count=speaker_count,
+            speaker_segments=speaker_segments_dicts,
         )
 
     # ------------------------------------------------------------------

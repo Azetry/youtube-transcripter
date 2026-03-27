@@ -1,6 +1,6 @@
 """Canonical transcript artifacts model."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from src.youtube_extractor import VideoInfo
@@ -27,3 +27,9 @@ class TranscriptArtifacts:
     segments_before_dedup: int = 0
     segments_after_dedup: int = 0
     consistency_text: str = ""
+
+    # Speaker attribution metadata (populated only when attribution requested)
+    speaker_attribution_enabled: bool = False
+    speaker_strategy: str = ""
+    speaker_count: int = 0
+    speaker_segments: Optional[list[dict]] = None

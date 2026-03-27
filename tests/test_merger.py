@@ -422,7 +422,7 @@ class TestSchemaV3MergeFields:
     def test_schema_version_is_3(self, db):
         cur = db.execute("SELECT MAX(version) FROM schema_version")
         assert cur.fetchone()[0] == SCHEMA_VERSION
-        assert SCHEMA_VERSION == 3
+        assert SCHEMA_VERSION == 4
 
     def test_merge_columns_exist(self, db):
         cur = db.execute("PRAGMA table_info(job_results)")
@@ -586,5 +586,5 @@ class TestSchemaMigrationV2ToV3:
 
         # Check version bumped
         cur = conn2.execute("SELECT MAX(version) FROM schema_version")
-        assert cur.fetchone()[0] == 3
+        assert cur.fetchone()[0] == SCHEMA_VERSION
         conn2.close()

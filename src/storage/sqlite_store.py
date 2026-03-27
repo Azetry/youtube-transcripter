@@ -29,8 +29,9 @@ class SQLiteStore:
                 """INSERT INTO jobs
                    (job_id, url, status, progress, message, error,
                     created_at, completed_at,
-                    language, skip_correction, custom_terms, input_signature)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    language, skip_correction, custom_terms,
+                    speaker_attribution, input_signature)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job.job_id,
                     job.url,
@@ -43,6 +44,7 @@ class SQLiteStore:
                     job.language,
                     int(job.skip_correction),
                     json.dumps(job.custom_terms) if job.custom_terms else None,
+                    int(job.speaker_attribution),
                     getattr(job, "_input_signature", None),
                 ),
             )
@@ -292,5 +294,6 @@ class SQLiteStore:
             language=row["language"],
             skip_correction=bool(row["skip_correction"]),
             custom_terms=custom_terms,
+            speaker_attribution=bool(row["speaker_attribution"]) if "speaker_attribution" in row.keys() else False,
         )
         return job

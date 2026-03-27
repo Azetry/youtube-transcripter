@@ -16,7 +16,7 @@ import unicodedata
 from difflib import SequenceMatcher
 from typing import Optional
 
-from src.transcript.models import ChunkTranscript, MergedTranscript, Segment
+from src.transcript.models import ChunkTranscript, MergedTranscript, Segment, SpeakerInfo
 
 
 # ── 4.1  Global timeline mapping ─────────────────────────────────────
@@ -37,7 +37,13 @@ def map_to_global_timeline(chunk: ChunkTranscript) -> list[Segment]:
         global_end = chunk.chunk_start + seg.end
         # Clamp to chunk boundary
         global_end = min(global_end, chunk.chunk_end)
-        mapped.append(Segment(start=global_start, end=global_end, text=seg.text))
+        mapped.append(Segment(
+            start=global_start,
+            end=global_end,
+            text=seg.text,
+            speaker=seg.speaker,
+            chunk_index=seg.chunk_index if seg.chunk_index is not None else chunk.chunk_index,
+        ))
     return mapped
 
 
@@ -385,3 +391,57 @@ def _remove_boundary_repeats(text: str) -> str:
         cleaned.append(curr)
 
     return "\n\n".join(cleaned)
+
+
+# ── 4.5  Speaker boundary uncertainty ─────────────────────────────
+
+
+def mark_chunk_boundary_uncertainty(
+    segments: list[Segment],
+    chunk_count: int,
+) -> list[Segment]:
+    """Mark the first segment of each non-first chunk as speaker-unknown.
+
+    When merging speaker-aware chunks, we cannot guarantee that the
+    speaker identity is consistent across chunk boundaries.  This
+    function replaces the speaker attribution_mode with "unknown" for
+    the first segment of each chunk after the first, preserving the
+    original label but signaling uncertainty.
+
+    Only affects segments that already have speaker metadata.
+    Returns a new list; does not mutate the input.
+    """
+    if chunk_count <= 1 or not segments:
+        return segments
+
+    result: list[Segment] = []
+    seen_chunks: set[int] = set()
+
+    for seg in segments:
+        ci = seg.chunk_index
+        if (
+            ci is not None
+            and ci > 0
+            and ci not in seen_chunks
+            and seg.speaker is not None
+        ):
+            # First segment of a non-first chunk: mark as unknown
+            seen_chunks.add(ci)
+            uncertain_speaker = SpeakerInfo(
+                label=seg.speaker.label,
+                confidence=0.1,
+                attribution_mode="unknown",
+            )
+            result.append(Segment(
+                start=seg.start,
+                end=seg.end,
+                text=seg.text,
+                speaker=uncertain_speaker,
+                chunk_index=seg.chunk_index,
+            ))
+        else:
+            if ci is not None:
+                seen_chunks.add(ci)
+            result.append(seg)
+
+    return result

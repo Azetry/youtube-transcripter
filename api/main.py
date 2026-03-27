@@ -55,6 +55,14 @@ class TranscribeRequest(BaseModel):
     language: Optional[str] = None
     skip_correction: bool = False
     custom_terms: Optional[list[str]] = None
+    speaker_attribution: bool = False
+
+
+class SpeakerAttributionResponse(BaseModel):
+    enabled: bool = False
+    strategy: str = ""
+    speaker_count: int = 0
+    speaker_segments: Optional[list[dict]] = None
 
 
 class TranscribeResponse(BaseModel):
@@ -69,6 +77,7 @@ class TranscribeResponse(BaseModel):
     change_count: int
     diff_inline: str
     processed_at: str
+    speaker_attribution: Optional[SpeakerAttributionResponse] = None
 
 
 class TaskStatusResponse(BaseModel):
@@ -117,6 +126,7 @@ async def process_transcription(job_id: str):
             language=job.language,
             skip_correction=job.skip_correction,
             custom_terms=job.custom_terms,
+            speaker_attribution=job.speaker_attribution,
             on_progress=on_progress,
             job_id=job_id,
         )
@@ -135,7 +145,21 @@ async def process_transcription(job_id: str):
             "diff_inline": artifacts.diff_inline,
             "processed_at": datetime.now().isoformat(),
         }
-        _task_results[job_id] = TranscribeResponse(**result_data)
+
+        # Include speaker attribution in response if enabled
+        speaker_resp = None
+        if artifacts.speaker_attribution_enabled:
+            speaker_resp = SpeakerAttributionResponse(
+                enabled=True,
+                strategy=artifacts.speaker_strategy,
+                speaker_count=artifacts.speaker_count,
+                speaker_segments=artifacts.speaker_segments,
+            )
+
+        _task_results[job_id] = TranscribeResponse(
+            **result_data,
+            speaker_attribution=speaker_resp,
+        )
         job_service.store_result(job_id, result_data)
 
         # Persist merge metadata for long-video jobs
@@ -233,6 +257,7 @@ async def start_transcription(
         language=request.language,
         skip_correction=request.skip_correction,
         custom_terms=request.custom_terms,
+        speaker_attribution=request.speaker_attribution,
     )
 
     # 加入背景任務

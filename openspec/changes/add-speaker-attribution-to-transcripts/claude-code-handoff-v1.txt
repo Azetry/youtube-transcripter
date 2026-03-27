@@ -1,0 +1,54 @@
+Implement speaker attribution support for repo `youtube-transcripter` against the approved local OpenSpec change `add-speaker-attribution-to-transcripts`.
+
+Repo:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+
+Approved local spec id:
+openspec-local-add-speaker-attribution-to-transcripts-20260328
+
+Primary spec/change to implement:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter/openspec/changes/add-speaker-attribution-to-transcripts/
+
+Goal:
+Add optional speaker-aware transcript artifacts for interview/podcast-style videos while preserving backward compatibility and keeping `youtube-transcripter` scoped as a transcript artifact generator.
+
+Required first output before large code changes:
+1. implementation review note
+2. canonical JSON schema draft for speaker-aware transcript artifacts
+3. task execution order v1
+
+After that, proceed with implementation if the path is sound.
+
+Core constraints:
+- JSON is the canonical transcript artifact.
+- Speaker attribution is optional, not default-required.
+- v1 uses generic labels such as `Speaker A/B/C`.
+- Low-confidence guesses are allowed but must be explicitly represented (for example confidence / attribution_mode / unknown).
+- Preserve backward compatibility for existing single-speaker and speaker-agnostic outputs.
+- Preserve speaker-labeled segments through long-video chunk merge conservatively; if chunk-level speaker identity is uncertain, prefer uncertainty over false continuity.
+- Do NOT turn this repo into an article generator.
+- Do NOT implement named host/guest inference in v1.
+- Do NOT redesign unrelated pipeline areas.
+- Do NOT archive OpenSpec.
+
+Expected work areas:
+- request surface / orchestration metadata for optional speaker attribution
+- canonical transcript artifact schema/models
+- speaker-attribution pipeline selection and initial integration
+- long-video merge behavior for speaker-aware segments
+- tests for backward compatibility + uncertainty handling
+
+Recommended execution order:
+1. lock canonical JSON schema
+2. lock request/config surface
+3. choose lowest-risk viable v1 attribution path
+4. implement schema/model changes
+5. implement pipeline changes
+6. implement merge/uncertainty behavior
+7. run relevant tests/validation
+
+Expected deliverable:
+- actual repo code/spec/docs changes in scope
+- implementation review note + schema draft + execution-order artifact saved in repo/workspace
+- relevant tests/checks run if possible
+- concise final summary of what changed, what remains risky, and how to use the new capability

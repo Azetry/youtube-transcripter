@@ -5,6 +5,28 @@ when merging chunk-level transcripts into a single global transcript.
 """
 
 from dataclasses import dataclass, field
+from typing import Optional
+
+
+@dataclass(frozen=True)
+class SpeakerInfo:
+    """Speaker attribution metadata for a single segment.
+
+    Attributes:
+        label: Generic speaker label (e.g. "Speaker A", "Speaker B").
+        confidence: 0.0–1.0 confidence in speaker assignment.
+        attribution_mode: "confident", "predicted", or "unknown".
+    """
+    label: str
+    confidence: float
+    attribution_mode: str  # "confident" | "predicted" | "unknown"
+
+    def to_dict(self) -> dict:
+        return {
+            "label": self.label,
+            "confidence": self.confidence,
+            "attribution_mode": self.attribution_mode,
+        }
 
 
 @dataclass(frozen=True)
@@ -18,6 +40,8 @@ class Segment:
     start: float
     end: float
     text: str
+    speaker: Optional[SpeakerInfo] = None
+    chunk_index: Optional[int] = None
 
 
 @dataclass

@@ -37,6 +37,7 @@ class JobService:
         language: Optional[str] = None,
         skip_correction: bool = False,
         custom_terms: Optional[list[str]] = None,
+        speaker_attribution: bool = False,
     ) -> Job:
         """Create a new transcription job."""
         job_id = f"job_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
@@ -46,12 +47,14 @@ class JobService:
             language=language,
             skip_correction=skip_correction,
             custom_terms=custom_terms,
+            speaker_attribution=speaker_attribution,
             message="任務已建立，等待處理...",
         )
 
         if self._store:
             signature = compute_input_signature(
-                url, language, skip_correction, custom_terms
+                url, language, skip_correction, custom_terms,
+                speaker_attribution=speaker_attribution,
             )
             job._input_signature = signature  # noqa: SLF001
             self._store.insert_job(job)
@@ -126,6 +129,7 @@ class JobService:
         language: Optional[str] = None,
         skip_correction: bool = False,
         custom_terms: Optional[list[str]] = None,
+        speaker_attribution: bool = False,
     ) -> Optional[Job]:
         """Find a completed job with matching inputs for reuse.
 
@@ -136,6 +140,7 @@ class JobService:
         if not self._store:
             return None
         signature = compute_input_signature(
-            url, language, skip_correction, custom_terms
+            url, language, skip_correction, custom_terms,
+            speaker_attribution=speaker_attribution,
         )
         return self._store.find_completed_by_signature(signature)

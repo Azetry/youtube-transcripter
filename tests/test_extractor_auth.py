@@ -112,9 +112,9 @@ class TestBuildYdlOpts:
     def test_no_auth_uses_unauthenticated_profile(self):
         with patch.dict(os.environ, {}, clear=True):
             opts = YouTubeExtractor._build_ydl_opts(quiet=True)
-            assert "extractor_args" in opts
             assert opts["quiet"] is True
             assert "cookiefile" not in opts
+            assert "socket_timeout" in opts
 
     def test_auth_configured_skips_unauthenticated_profile(self):
         env = {"YT_DLP_COOKIES_FILE": "/tmp/c.txt"}

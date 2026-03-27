@@ -110,6 +110,7 @@ def process_video(
     language: str | None = None,
     skip_correction: bool = False,
     custom_terms: list[str] | None = None,
+    speaker_attribution: bool = False,
     output_dir: str = "./transcripts",
     download_dir: str = "./downloads",
 ) -> None:
@@ -141,6 +142,7 @@ def process_video(
             language=language,
             skip_correction=skip_correction,
             custom_terms=custom_terms,
+            speaker_attribution=speaker_attribution,
             on_progress=on_progress,
         )
 
@@ -243,6 +245,11 @@ def main():
         help="需要正確辨識的專有名詞列表",
     )
     parser.add_argument(
+        "--speakers",
+        action="store_true",
+        help="啟用說話者標註 (實驗性，使用通用標籤如 Speaker A/B/C)",
+    )
+    parser.add_argument(
         "-o", "--output",
         default="./transcripts",
         help="輸出目錄 (預設: ./transcripts)",
@@ -265,6 +272,7 @@ def main():
                 language=args.language,
                 skip_correction=args.no_correct,
                 custom_terms=args.terms,
+                speaker_attribution=args.speakers,
                 output_dir=args.output,
             )
         except KeyboardInterrupt:
