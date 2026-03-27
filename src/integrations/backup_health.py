@@ -32,6 +32,7 @@ class BackupHealthStatus:
     service: str = "youtube-transcripter-backup"
     auth_configured: bool = False
     openai_configured: bool = False
+    service_role: Optional[str] = None
     detail: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -41,6 +42,8 @@ class BackupHealthStatus:
             "auth_configured": self.auth_configured,
             "openai_configured": self.openai_configured,
         }
+        if self.service_role is not None:
+            d["service_role"] = self.service_role
         if self.detail is not None:
             d["detail"] = self.detail
         return d
@@ -62,9 +65,12 @@ def check_backup_health() -> BackupHealthStatus:
             missing.append("OPENAI_API_KEY")
         detail = f"missing env: {', '.join(missing)}"
 
+    service_role = os.environ.get("SERVICE_ROLE") or None
+
     return BackupHealthStatus(
         healthy=healthy,
         auth_configured=token_ok,
         openai_configured=openai_ok,
+        service_role=service_role,
         detail=detail,
     )

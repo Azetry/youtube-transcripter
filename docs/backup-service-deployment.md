@@ -46,6 +46,9 @@ Required:
 - `BACKUP_SERVICE_TOKEN=<shared-secret>`
 - `OPENAI_API_KEY=...`
 
+Injected automatically by `docker-compose.backup.yml`:
+- `SERVICE_ROLE=backup`
+
 Optional / recommended if B is expected to succeed where A fails:
 - `YT_DLP_COOKIES_FILE=/path/to/cookies.txt`
 - or `YT_DLP_COOKIES_FROM_BROWSER=chrome`
@@ -62,17 +65,21 @@ Recommended practice:
   - `git checkout <commit-sha>`
 
 ### 2. Start B service
-Ensure the FastAPI backend is reachable on the internal network and the delegation endpoints are active.
+Use the backup compose overlay to start only the backend with backup-specific settings.
+The overlay publishes the backend on host port 8000, injects `SERVICE_ROLE=backup` and `BACKUP_SERVICE_TOKEN`, and disables the frontend service.
 
-Example:
 ```bash
-# on B
-export BACKUP_SERVICE_TOKEN=... 
+# on B — set required env vars
+export BACKUP_SERVICE_TOKEN=...
 export OPENAI_API_KEY=...
 # plus any YouTube auth env you want B to use
 
-docker compose up -d backend
+# start backup deployment
+docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d
 ```
+
+> **Note:** The frontend service is automatically excluded in backup mode via a compose profile.
+> To start the default (primary) deployment with frontend, use `docker compose up -d` as usual.
 
 ### 3. Configure A
 ```bash

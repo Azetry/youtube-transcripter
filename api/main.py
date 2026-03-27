@@ -289,10 +289,14 @@ async def correct_text(text: str, context: Optional[str] = None):
 @app.get("/api/health")
 async def health_check():
     """健康檢查"""
-    return {
+    resp = {
         "status": "healthy",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
     }
+    service_role = os.getenv("SERVICE_ROLE")
+    if service_role:
+        resp["service_role"] = service_role
+    return resp
 
 
 if __name__ == "__main__":

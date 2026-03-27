@@ -1,0 +1,25 @@
+# Backup deployment overlay.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d
+#
+# This override:
+#   - publishes the backend on host port 8000
+#   - injects backup-specific environment variables
+#   - disables the frontend service
+#
+# Required env vars (set in shell or .env):
+#   BACKUP_SERVICE_TOKEN  — shared bearer token for delegation auth
+#   OPENAI_API_KEY        — OpenAI API key
+
+services:
+  backend:
+    ports:
+      - "8000:8000"
+    environment:
+      - SERVICE_ROLE=backup
+      - BACKUP_SERVICE_TOKEN=${BACKUP_SERVICE_TOKEN}
+
+  frontend:
+    profiles:
+      - disabled

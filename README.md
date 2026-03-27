@@ -123,8 +123,23 @@ python main.py --help
 | `OPENAI_API_KEY` | OpenAI API key | Yes |
 | `BACKUP_SERVICE_URL` | Backup-service base URL for A→B delegation | No |
 | `BACKUP_SERVICE_TOKEN` | Shared bearer token for backup-service delegation | No |
+| `SERVICE_ROLE` | Service role marker (e.g. `backup`); reflected in health output | No |
 | `YT_DLP_COOKIES_FILE` | Netscape-format cookies file for authenticated extraction | No |
 | `YT_DLP_COOKIES_FROM_BROWSER` | Browser name for cookie extraction | No |
+
+## Backup Deployment
+
+To run this repo as a backup (B) service — backend only, no frontend:
+
+```bash
+export BACKUP_SERVICE_TOKEN=<shared-secret>
+export OPENAI_API_KEY=<key>
+
+docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d
+```
+
+This publishes the backend on port 8000 with `SERVICE_ROLE=backup` and disables the frontend.
+See `docs/backup-service-deployment.md` for the full A/B deployment and acceptance guide.
 
 ## Current Project State
 
