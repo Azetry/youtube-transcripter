@@ -189,7 +189,7 @@ class YouTubeExtractor:
             quality: 音訊品質 kbps (預設 64，確保不超過 Whisper 25MB 限制)
         """
         ydl_opts = self._build_ydl_opts(
-            format='bestaudio/best',
+            format='bestaudio[ext=m4a]/bestaudio/best',
             postprocessors=[{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': format,

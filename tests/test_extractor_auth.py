@@ -270,4 +270,4 @@ class TestAuthOptsIntegration:
 
         call_opts = mock_ydl_cls.call_args[0][0]
         assert call_opts["cookiefile"] == "/x.txt"
-        assert call_opts["format"] == "bestaudio/best"  # existing opts preserved
+        assert call_opts["format"] == "bestaudio[ext=m4a]/bestaudio/best"  # existing opts preserved

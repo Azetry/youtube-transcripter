@@ -67,8 +67,12 @@ class TestClassifyFailure:
 
         # FORMAT_ERROR
         ("format not available", FailureCategory.FORMAT_ERROR),
+        ("format is not available", FailureCategory.FORMAT_ERROR),
         ("no suitable format found", FailureCategory.FORMAT_ERROR),
         ("requested format not available", FailureCategory.FORMAT_ERROR),
+        ("Requested format is not available. Use --list-formats for a list of available formats", FailureCategory.FORMAT_ERROR),
+        ("no video formats found", FailureCategory.FORMAT_ERROR),
+        ("Use --list-formats to see available formats", FailureCategory.FORMAT_ERROR),
     ])
     def test_known_patterns(self, msg: str, expected: FailureCategory):
         assert classify_failure(msg) == expected

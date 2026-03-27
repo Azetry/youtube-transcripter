@@ -89,9 +89,11 @@ _FAILURE_PATTERNS: list[FailurePattern] = [
     FailurePattern(re.compile(r"HTTP\s+Error\s+404", re.I), FailureCategory.UNAVAILABLE),
 
     # --- format issues ---
-    FailurePattern(re.compile(r"format\s+not\s+available", re.I), FailureCategory.FORMAT_ERROR),
+    FailurePattern(re.compile(r"requested\s+format\s+is\s+not\s+available", re.I), FailureCategory.FORMAT_ERROR),
+    FailurePattern(re.compile(r"format\s+(is\s+)?not\s+available", re.I), FailureCategory.FORMAT_ERROR),
     FailurePattern(re.compile(r"no\s+suitable\s+format", re.I), FailureCategory.FORMAT_ERROR),
-    FailurePattern(re.compile(r"requested\s+format\s+not\s+available", re.I), FailureCategory.FORMAT_ERROR),
+    FailurePattern(re.compile(r"no\s+video\s+formats\s+found", re.I), FailureCategory.FORMAT_ERROR),
+    FailurePattern(re.compile(r"use\s+--list-formats", re.I), FailureCategory.FORMAT_ERROR),
 ]
 
 

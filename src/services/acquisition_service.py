@@ -236,7 +236,7 @@ class ThisHostAcquisitionService:
 
         base_opts = _build_ydl_overrides(mode)
         base_opts.update({
-            "format": "bestaudio/best",
+            "format": "bestaudio[ext=m4a]/bestaudio/best",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": format,
