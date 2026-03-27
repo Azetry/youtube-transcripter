@@ -245,9 +245,12 @@ def main():
         help="需要正確辨識的專有名詞列表",
     )
     parser.add_argument(
+        "--speaker-attribution",
         "--speakers",
         action="store_true",
-        help="啟用說話者標註 (實驗性，使用通用標籤如 Speaker A/B/C)",
+        dest="speaker_attribution",
+        help="Enable speaker attribution (experimental). Assigns generic labels "
+        "(Speaker A/B/C) based on pause heuristics — not named-speaker diarization.",
     )
     parser.add_argument(
         "-o", "--output",
@@ -272,7 +275,7 @@ def main():
                 language=args.language,
                 skip_correction=args.no_correct,
                 custom_terms=args.terms,
-                speaker_attribution=args.speakers,
+                speaker_attribution=args.speaker_attribution,
                 output_dir=args.output,
             )
         except KeyboardInterrupt:

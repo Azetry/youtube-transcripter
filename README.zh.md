@@ -13,6 +13,7 @@
 - **雙介面** - 提供 CLI 與 Web 介面
 - **Docker 部署** - 可用 Docker Compose 快速部署
 - **長影片流程** - 支援 chunking、merge / dedupe 與長影片逐字稿流程
+- **說話者標註** - 實驗性通用標籤說話者標註 (Speaker A/B/C)，基於停頓偵測，非具名說話者辨識
 - **Acquisition Hardening** - 支援取得 YouTube 時的診斷、fallback policy 與 backup-service delegation 基礎能力
 
 ## 架構
@@ -70,6 +71,9 @@ pip install -r requirements.txt
 
 # 基本使用
 python main.py https://youtube.com/watch?v=VIDEO_ID
+
+# 啟用說話者標註（實驗性，通用標籤）
+python main.py --speaker-attribution https://youtube.com/watch?v=VIDEO_ID
 
 # 互動模式
 python main.py -i

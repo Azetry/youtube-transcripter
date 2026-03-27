@@ -13,6 +13,7 @@ A powerful YouTube video transcription tool that integrates OpenAI Whisper API f
 - **Dual Interface** - Both CLI and Web interface available
 - **Docker Deployment** - One-click deployment with Docker Compose
 - **Long-video Pipeline** - Chunking, merge/dedupe, and long-video transcript processing support
+- **Speaker Attribution** - Experimental generic-label speaker attribution (Speaker A/B/C) using pause heuristics; not named-speaker diarization
 - **Acquisition Hardening** - Structured acquisition diagnostics, fallback policy, and backup-service delegation foundation
 
 ## Architecture
@@ -70,6 +71,9 @@ pip install -r requirements.txt
 
 # Basic usage
 python main.py https://youtube.com/watch?v=VIDEO_ID
+
+# Enable speaker attribution (experimental, generic labels)
+python main.py --speaker-attribution https://youtube.com/watch?v=VIDEO_ID
 
 # Interactive mode
 python main.py -i

@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 # 載入環境變數
@@ -55,14 +55,26 @@ class TranscribeRequest(BaseModel):
     language: Optional[str] = None
     skip_correction: bool = False
     custom_terms: Optional[list[str]] = None
-    speaker_attribution: bool = False
+    speaker_attribution: bool = Field(
+        default=False,
+        description="Enable speaker attribution (experimental). Assigns generic "
+        "labels (Speaker A/B/C) using pause-based heuristics. This is not "
+        "named-speaker diarization.",
+    )
 
 
 class SpeakerAttributionResponse(BaseModel):
-    enabled: bool = False
-    strategy: str = ""
-    speaker_count: int = 0
-    speaker_segments: Optional[list[dict]] = None
+    enabled: bool = Field(default=False, description="Whether speaker attribution was applied.")
+    strategy: str = Field(default="", description="Attribution strategy used (e.g. 'pause_heuristic_v1').")
+    detected_speaker_count: int = Field(
+        default=0,
+        description="Number of distinct speaker labels detected. Labels are generic "
+        "(Speaker A/B/C), not identified by name.",
+    )
+    speaker_segments: Optional[list[dict]] = Field(
+        default=None,
+        description="Segments with speaker labels attached, if attribution was enabled.",
+    )
 
 
 class TranscribeResponse(BaseModel):
@@ -152,7 +164,7 @@ async def process_transcription(job_id: str):
             speaker_resp = SpeakerAttributionResponse(
                 enabled=True,
                 strategy=artifacts.speaker_strategy,
-                speaker_count=artifacts.speaker_count,
+                detected_speaker_count=artifacts.speaker_count,
                 speaker_segments=artifacts.speaker_segments,
             )
 

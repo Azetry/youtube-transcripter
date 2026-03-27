@@ -1,0 +1,41 @@
+Implement a small, tightly scoped v2 hardening follow-up for the approved speaker-attribution work in repo `youtube-transcripter`.
+
+Repo:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+
+Linked spec id:
+openspec-local-add-speaker-attribution-to-transcripts-20260328
+
+Context:
+- Speaker attribution v1 plumbing is already implemented and committed.
+- Validation passed.
+- Friday review says the main next-step should be request-surface and operator-UX cleanup, not a big diarization redesign.
+- Keep this round small, safe, and backward compatible.
+
+Goal:
+Clean up the request/config interface and docs so the v1 feature is easier to understand and less semantically confusing.
+
+In-scope priorities:
+1. Improve CLI/API naming around enabling speaker attribution.
+2. Avoid ambiguous flag naming like `--speakers` if a clearer surface can be used.
+3. Preserve backward compatibility where practical (for example alias old flag to new behavior if needed).
+4. Add/adjust docs or help text so users understand this is generic-label attribution, not true named-speaker diarization.
+5. Keep implementation minimal and focused.
+
+Suggested direction:
+- Prefer a clearer CLI flag like `--speaker-attribution` (or equivalent explicit naming).
+- If `--speakers` already exists, consider retaining it as a backward-compatible alias but make the explicit flag primary in help/docs.
+- Review API request/response naming and make sure it reads as a feature toggle, not a fixed speaker-count contract.
+- Update README/help text/examples if appropriate.
+
+Do NOT:
+- attempt a real diarization-engine integration in this round
+- redesign the transcript schema again
+- broaden into named host/guest inference
+- touch unrelated backup/deployment code
+- archive OpenSpec
+
+Expected deliverable:
+- small in-scope code/docs changes only
+- validation/tests run if relevant
+- concise summary of what request-surface/naming cleanup was done
