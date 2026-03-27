@@ -23,6 +23,12 @@ from src.models.acquisition import (
 )
 from src.youtube_extractor import YouTubeExtractor, VideoInfo
 
+_AUDIO_FORMAT_SELECTORS: tuple[str, ...] = (
+    "bestaudio[ext=m4a]/bestaudio/best",
+    "bestaudio/best",
+    "best",
+)
+
 
 # ---------------------------------------------------------------------------
 # Strategy helpers
@@ -233,23 +239,40 @@ class ThisHostAcquisitionService:
     ) -> VideoInfo:
         """Download audio using yt-dlp options forced to a specific mode."""
         from yt_dlp import YoutubeDL
+        from yt_dlp.utils import DownloadError
 
         base_opts = _build_ydl_overrides(mode)
-        base_opts.update({
-            "format": "bestaudio[ext=m4a]/bestaudio/best",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": format,
-                "preferredquality": quality,
-            }],
-            "outtmpl": f"{self._extractor.output_dir}/%(id)s.%(ext)s",
-            "quiet": False,
-            "no_warnings": False,
-        })
+        last_exc: Optional[DownloadError] = None
+        info: Optional[dict] = None
+        audio_file: Optional[str] = None
 
-        with YoutubeDL(base_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            audio_file = f"{self._extractor.output_dir}/{info.get('id')}.{format}"
+        for selector in _AUDIO_FORMAT_SELECTORS:
+            opts = dict(base_opts)
+            opts.update({
+                "format": selector,
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": format,
+                    "preferredquality": quality,
+                }],
+                "outtmpl": f"{self._extractor.output_dir}/%(id)s.%(ext)s",
+                "quiet": False,
+                "no_warnings": False,
+            })
+            try:
+                with YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    audio_file = f"{self._extractor.output_dir}/{info.get('id')}.{format}"
+                    break
+            except DownloadError as exc:
+                last_exc = exc
+                if "Requested format is not available" not in str(exc):
+                    raise
+
+        if info is None or audio_file is None:
+            if last_exc is not None:
+                raise last_exc
+            raise DownloadError("Audio acquisition failed: no format selector succeeded.")
 
         return VideoInfo(
             video_id=info.get("id", ""),

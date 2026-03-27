@@ -38,6 +38,15 @@ To resolve this, provide authenticated cookies via environment variables:
 
 See yt-dlp docs for cookie extraction details."""
 
+_AUDIO_FORMAT_SELECTORS: tuple[str, ...] = (
+    # Prefer AAC/m4a when available (works well with mp3 post-processing).
+    "bestaudio[ext=m4a]/bestaudio/best",
+    # Broader fallback for videos where m4a variants are missing.
+    "bestaudio/best",
+    # Final fallback: any muxed stream with audio.
+    "best",
+)
+
 
 class AuthBlockError(Exception):
     """Raised when yt-dlp fails due to YouTube auth/bot blocking.
@@ -90,12 +99,14 @@ class YouTubeExtractor:
         """Best-effort yt-dlp options for unauthenticated extraction.
 
         These reduce the likelihood of bot detection when no cookies are
-        provided.  They are not guaranteed to bypass all restrictions.
+        provided. They are not guaranteed to bypass all restrictions.
+
+        NOTE:
+        We intentionally avoid forcing specific YouTube player clients here.
+        Some clients (notably mweb) now require PO tokens for media URLs,
+        which can cause yt-dlp to expose only storyboard/image formats.
         """
         return {
-            "extractor_args": {"youtube": {
-                "player_client": ["web", "mweb"],
-            }},
             "socket_timeout": 30,
         }
 
@@ -188,24 +199,37 @@ class YouTubeExtractor:
             format: 音訊格式 (預設 mp3)
             quality: 音訊品質 kbps (預設 64，確保不超過 Whisper 25MB 限制)
         """
-        ydl_opts = self._build_ydl_opts(
-            format='bestaudio[ext=m4a]/bestaudio/best',
-            postprocessors=[{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': format,
-                'preferredquality': quality,
-            }],
-            outtmpl=f'{self.output_dir}/%(id)s.%(ext)s',
-            quiet=False,
-            no_warnings=False,
-        )
+        last_exc: Optional[DownloadError] = None
+        info: Optional[dict] = None
+        audio_file: Optional[str] = None
 
-        try:
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                audio_file = f"{self.output_dir}/{info.get('id')}.{format}"
-        except DownloadError as exc:
-            self._handle_download_error(exc)
+        for selector in _AUDIO_FORMAT_SELECTORS:
+            ydl_opts = self._build_ydl_opts(
+                format=selector,
+                postprocessors=[{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': format,
+                    'preferredquality': quality,
+                }],
+                outtmpl=f'{self.output_dir}/%(id)s.%(ext)s',
+                quiet=False,
+                no_warnings=False,
+            )
+            try:
+                with YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    audio_file = f"{self.output_dir}/{info.get('id')}.{format}"
+                    break
+            except DownloadError as exc:
+                last_exc = exc
+                if "Requested format is not available" not in str(exc):
+                    self._handle_download_error(exc)
+
+        if info is None or audio_file is None:
+            # Exhausted all format selectors.
+            if last_exc is not None:
+                self._handle_download_error(last_exc)
+            raise DownloadError("Audio acquisition failed: no format selector succeeded.")
 
         return VideoInfo(
             video_id=info.get('id', ''),

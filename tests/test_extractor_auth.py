@@ -94,10 +94,9 @@ class TestBuildAuthOpts:
 
 
 class TestBuildUnauthenticatedOpts:
-    def test_returns_extractor_args(self):
+    def test_does_not_force_player_client(self):
         opts = YouTubeExtractor._build_unauthenticated_opts()
-        assert "extractor_args" in opts
-        assert "youtube" in opts["extractor_args"]
+        assert "extractor_args" not in opts
 
     def test_includes_socket_timeout(self):
         opts = YouTubeExtractor._build_unauthenticated_opts()
