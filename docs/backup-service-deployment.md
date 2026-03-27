@@ -102,6 +102,10 @@ Expected response includes:
 - `healthy`
 - `auth_configured`
 - `openai_configured`
+- `yt_auth_configured`
+- `yt_auth_mode` (when configured)
+
+> Important: `yt_auth_configured=true` means the backup host has some YouTube auth mode configured, not that the cookies are guaranteed fresh. A green health response can still coexist with delegated failures of category `auth_required` if the configured cookies are stale or unreadable.
 
 ### Phase 1 — Direct delegated request to B
 Manually POST a delegated request to B:
@@ -130,6 +134,7 @@ On A, verify the backup client can call B successfully using the configured URL 
 Create a scenario where:
 - A fails locally (e.g. no valid YouTube cookies / blocked path)
 - B is configured to succeed
+- B has usable YouTube auth configured (`YT_DLP_COOKIES_FILE` or `YT_DLP_COOKIES_FROM_BROWSER`) when the test video is auth-gated
 
 Expected:
 1. A attempts local acquisition
@@ -151,6 +156,7 @@ Expected:
 - [ ] A cannot reach B
 - [ ] bearer token mismatch
 - [ ] B itself cannot extract YouTube
+- [ ] B health is green but delegated auth-gated videos still fail with `auth_required`
 - [ ] A never enters delegate branch
 - [ ] delegated response cannot be parsed/consumed
 
