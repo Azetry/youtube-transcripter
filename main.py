@@ -111,6 +111,7 @@ def process_video(
     skip_correction: bool = False,
     custom_terms: list[str] | None = None,
     speaker_attribution: bool = False,
+    speaker_strategy: str | None = None,
     output_dir: str = "./transcripts",
     download_dir: str = "./downloads",
 ) -> None:
@@ -143,6 +144,7 @@ def process_video(
             skip_correction=skip_correction,
             custom_terms=custom_terms,
             speaker_attribution=speaker_attribution,
+            speaker_strategy=speaker_strategy,
             on_progress=on_progress,
         )
 
@@ -250,7 +252,15 @@ def main():
         action="store_true",
         dest="speaker_attribution",
         help="Enable speaker attribution (experimental). Assigns generic labels "
-        "(Speaker A/B/C) based on pause heuristics — not named-speaker diarization.",
+        "(Speaker A/B/C) to transcript segments.",
+    )
+    parser.add_argument(
+        "--speaker-strategy",
+        default=None,
+        dest="speaker_strategy",
+        help="Speaker attribution strategy: 'pause_heuristic_v1' (default) or "
+        "'pyannote_v1' (real diarization, requires pyannote.audio + "
+        "PYANNOTE_AUTH_TOKEN). Implies --speaker-attribution.",
     )
     parser.add_argument(
         "-o", "--output",
@@ -266,6 +276,9 @@ def main():
         console.print("可以複製 .env.example 為 .env 並填入 API Key")
         return
 
+    # --speaker-strategy implies --speaker-attribution
+    speaker_attribution = args.speaker_attribution or bool(args.speaker_strategy)
+
     if args.interactive or not args.url:
         interactive_mode()
     else:
@@ -275,7 +288,8 @@ def main():
                 language=args.language,
                 skip_correction=args.no_correct,
                 custom_terms=args.terms,
-                speaker_attribution=args.speaker_attribution,
+                speaker_attribution=speaker_attribution,
+                speaker_strategy=args.speaker_strategy,
                 output_dir=args.output,
             )
         except KeyboardInterrupt:

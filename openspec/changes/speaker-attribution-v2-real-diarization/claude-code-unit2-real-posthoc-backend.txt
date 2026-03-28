@@ -1,0 +1,42 @@
+Implement Speaker Attribution v2 — Unit 2 for repo `youtube-transcripter`.
+
+Repo:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+
+Linked local spec id:
+openspec-local-speaker-attribution-v2-real-diarization-20260328
+
+Primary OpenSpec change:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter/openspec/changes/speaker-attribution-v2-real-diarization/
+
+Task scope:
+Unit 2 — One real post-hoc diarization backend integration
+
+Prerequisite status:
+- Unit 1 strategy seam is complete and committed.
+- Heuristic fallback/debug mode remains available.
+
+Goal:
+Integrate **one real post-hoc diarization backend** behind the new strategy abstraction, without adding named-speaker inference or multi-backend auto-routing.
+
+In scope:
+1. Add one real post-hoc diarization backend implementation
+2. Connect it to the strategy abstraction
+3. Translate backend output into internal speaker-turn structures
+4. Preserve explicit uncertainty semantics
+5. Keep heuristic mode working unchanged
+6. Add/update tests as needed
+7. Run relevant validation/tests
+
+Constraints:
+- Do NOT implement named speaker / Host-Guest inference
+- Do NOT add provider-native routing or hybrid auto-selection in this unit
+- Do NOT broaden scope into operator docs polish beyond what is strictly needed
+- Do NOT touch unrelated backup/deployment code
+- Keep the implementation reviewable and localized
+
+Expected deliverable:
+- one real post-hoc strategy is runnable behind the strategy seam
+- heuristic strategy still works
+- repo validation/tests pass
+- concise summary of backend choice, integration points, and remaining limitations

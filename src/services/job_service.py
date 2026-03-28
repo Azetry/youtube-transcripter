@@ -38,6 +38,7 @@ class JobService:
         skip_correction: bool = False,
         custom_terms: Optional[list[str]] = None,
         speaker_attribution: bool = False,
+        speaker_strategy: Optional[str] = None,
     ) -> Job:
         """Create a new transcription job."""
         job_id = f"job_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
@@ -48,6 +49,7 @@ class JobService:
             skip_correction=skip_correction,
             custom_terms=custom_terms,
             speaker_attribution=speaker_attribution,
+            speaker_strategy=speaker_strategy,
             message="任務已建立，等待處理...",
         )
 

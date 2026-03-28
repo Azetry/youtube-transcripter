@@ -33,9 +33,10 @@ from src.media.chunker import needs_chunking, generate_chunk_files
 from src.transcript.models import ChunkTranscript, Segment
 from src.transcript.merger import merge_chunks, consistency_pass, mark_chunk_boundary_uncertainty
 from src.transcript.speaker_attribution import (
-    STRATEGY_ID as SPEAKER_STRATEGY_ID,
+    DEFAULT_STRATEGY as _DEFAULT_SPEAKER_STRATEGY,
     attribute_speakers,
     count_speakers,
+    get_strategy,
     segments_to_dicts,
 )
 
@@ -166,6 +167,7 @@ class TranscriptionService:
         skip_correction: bool = False,
         custom_terms: Optional[list[str]] = None,
         speaker_attribution: bool = False,
+        speaker_strategy: Optional[str] = None,
         on_progress: Optional[ProgressCallback] = None,
         job_id: Optional[str] = None,
     ) -> TranscriptArtifacts:
@@ -227,6 +229,7 @@ class TranscriptionService:
                     skip_correction=skip_correction,
                     custom_terms=custom_terms,
                     speaker_attribution=speaker_attribution,
+                    speaker_strategy=speaker_strategy,
                     progress=progress,
                     job_id=job_id or "tmp",
                     chunk_files_to_clean=chunk_files_to_clean,
@@ -238,6 +241,7 @@ class TranscriptionService:
                     skip_correction=skip_correction,
                     custom_terms=custom_terms,
                     speaker_attribution=speaker_attribution,
+                    speaker_strategy=speaker_strategy,
                     progress=progress,
                 )
 
@@ -258,6 +262,7 @@ class TranscriptionService:
         custom_terms: Optional[list[str]],
         speaker_attribution: bool,
         progress: Callable,
+        speaker_strategy: Optional[str] = None,
     ) -> TranscriptArtifacts:
         """Single-pass pipeline for short videos."""
         # Transcribe — use timestamps when speaker attribution is needed
@@ -296,12 +301,16 @@ class TranscriptionService:
         # Speaker attribution (optional)
         speaker_segments_dicts = None
         speaker_count = 0
-        speaker_strategy = ""
+        resolved_strategy = ""
         if speaker_attribution and raw_segments:
-            attributed = attribute_speakers(raw_segments)
-            speaker_count = count_speakers(attributed)
-            speaker_strategy = SPEAKER_STRATEGY_ID
-            speaker_segments_dicts = segments_to_dicts(attributed)
+            strategy = get_strategy(speaker_strategy)
+            result = strategy.attribute(
+                raw_segments,
+                audio_file=video_info.audio_file,
+            )
+            speaker_count = count_speakers(result.segments)
+            resolved_strategy = result.strategy_id
+            speaker_segments_dicts = segments_to_dicts(result.segments)
 
         # Diff
         progress(JobStatus.COMPLETED, 90, "產生差異比較...")
@@ -317,7 +326,7 @@ class TranscriptionService:
             change_count=diff_result.change_count,
             diff_inline=diff_inline,
             speaker_attribution_enabled=speaker_attribution,
-            speaker_strategy=speaker_strategy,
+            speaker_strategy=resolved_strategy,
             speaker_count=speaker_count,
             speaker_segments=speaker_segments_dicts,
         )
@@ -332,6 +341,7 @@ class TranscriptionService:
         progress: Callable,
         job_id: str,
         chunk_files_to_clean: list[str],
+        speaker_strategy: Optional[str] = None,
     ) -> TranscriptArtifacts:
         """Chunked pipeline for long videos."""
         # 2. Generate chunk files
@@ -379,9 +389,13 @@ class TranscriptionService:
 
             # Speaker attribution per chunk (before merge)
             if speaker_attribution and segments:
-                segments = attribute_speakers(
-                    segments, chunk_index=ca.index
+                sa_strategy = get_strategy(speaker_strategy)
+                sa_result = sa_strategy.attribute(
+                    segments,
+                    chunk_index=ca.index,
+                    audio_file=ca.file_path,
                 )
+                segments = sa_result.segments
 
             # Use first chunk's detected language if auto-detecting
             if not detected_language and ts_result.get("language"):
@@ -418,13 +432,13 @@ class TranscriptionService:
         # 4b. Mark chunk-boundary speaker uncertainty
         speaker_segments_dicts = None
         speaker_count = 0
-        speaker_strategy = ""
+        resolved_strategy = ""
         if speaker_attribution:
             boundary_marked = mark_chunk_boundary_uncertainty(
                 merged.segments, merged.chunk_count
             )
             speaker_count = count_speakers(boundary_marked)
-            speaker_strategy = SPEAKER_STRATEGY_ID
+            resolved_strategy = (speaker_strategy or _DEFAULT_SPEAKER_STRATEGY)
             speaker_segments_dicts = segments_to_dicts(boundary_marked)
 
         # 5. Consistency pass (skip when correction was skipped so
@@ -454,7 +468,7 @@ class TranscriptionService:
             segments_after_dedup=merged.segments_after_dedup,
             consistency_text=final_corrected,
             speaker_attribution_enabled=speaker_attribution,
-            speaker_strategy=speaker_strategy,
+            speaker_strategy=resolved_strategy,
             speaker_count=speaker_count,
             speaker_segments=speaker_segments_dicts,
         )

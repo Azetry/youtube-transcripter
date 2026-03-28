@@ -58,8 +58,14 @@ class TranscribeRequest(BaseModel):
     speaker_attribution: bool = Field(
         default=False,
         description="Enable speaker attribution (experimental). Assigns generic "
-        "labels (Speaker A/B/C) using pause-based heuristics. This is not "
-        "named-speaker diarization.",
+        "labels (Speaker A/B/C) to transcript segments.",
+    )
+    speaker_strategy: Optional[str] = Field(
+        default=None,
+        description="Speaker attribution strategy. Options: 'pause_heuristic_v1' "
+        "(default, pause-based), 'pyannote_v1' (real diarization, requires "
+        "pyannote.audio and PYANNOTE_AUTH_TOKEN). Only used when "
+        "speaker_attribution is enabled.",
     )
 
 
@@ -139,6 +145,7 @@ async def process_transcription(job_id: str):
             skip_correction=job.skip_correction,
             custom_terms=job.custom_terms,
             speaker_attribution=job.speaker_attribution,
+            speaker_strategy=getattr(job, "speaker_strategy", None),
             on_progress=on_progress,
             job_id=job_id,
         )
@@ -270,6 +277,7 @@ async def start_transcription(
         skip_correction=request.skip_correction,
         custom_terms=request.custom_terms,
         speaker_attribution=request.speaker_attribution,
+        speaker_strategy=request.speaker_strategy,
     )
 
     # 加入背景任務

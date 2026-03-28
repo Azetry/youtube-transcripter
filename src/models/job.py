@@ -39,6 +39,7 @@ class Job:
     skip_correction: bool = False
     custom_terms: Optional[list[str]] = None
     speaker_attribution: bool = False
+    speaker_strategy: Optional[str] = None
 
     def update(self, status: JobStatus, progress: int, message: str = "") -> None:
         """Update job state."""

@@ -4,6 +4,7 @@ Strategy abstraction (v2):
     - ``SpeakerAttributionStrategy`` — protocol for attribution backends
     - ``AttributionResult`` — structured output from any strategy
     - ``PauseHeuristicStrategy`` — pause-based heuristic (default/fallback)
+    - ``PyannoteStrategy`` — real post-hoc diarization via pyannote.audio
     - ``get_strategy`` / ``list_strategies`` — registry helpers
     - ``DEFAULT_STRATEGY`` — identifier of the default strategy
 
@@ -11,13 +12,12 @@ Backward-compatible helpers (v1 surface):
     - ``attribute_speakers`` — module-level function delegating to heuristic
     - ``count_speakers`` / ``segments_to_dicts`` — utility functions
     - ``STRATEGY_ID`` — alias for the heuristic strategy identifier
-
-A real diarization engine (e.g. pyannote) can be added as a separate
-strategy implementation without any schema or pipeline changes.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import string
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
@@ -62,8 +62,17 @@ class SpeakerAttributionStrategy(Protocol):
         segments: list[Segment],
         *,
         chunk_index: int | None = None,
+        audio_file: str | None = None,
     ) -> AttributionResult:
-        """Run attribution on *segments* and return an ``AttributionResult``."""
+        """Run attribution on *segments* and return an ``AttributionResult``.
+
+        Args:
+            segments: Ordered transcript segments to attribute.
+            chunk_index: Optional chunk index to attach to output segments.
+            audio_file: Path to the audio file.  Required by backends that
+                perform real diarization (e.g. ``pyannote_v1``); ignored by
+                text-only strategies like the pause heuristic.
+        """
         ...
 
 
@@ -116,6 +125,7 @@ class PauseHeuristicStrategy:
         segments: list[Segment],
         *,
         chunk_index: int | None = None,
+        audio_file: str | None = None,
     ) -> AttributionResult:
         """Assign speaker labels using pause-based heuristic."""
         if not segments:
@@ -172,6 +182,176 @@ class PauseHeuristicStrategy:
 
 
 # ---------------------------------------------------------------------------
+# Pyannote post-hoc diarization strategy
+# ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
+
+PYANNOTE_STRATEGY_ID = "pyannote_v1"
+_PYANNOTE_MODEL = "pyannote/speaker-diarization-3.1"
+
+
+class PyannoteStrategy:
+    """Real post-hoc speaker diarization via pyannote.audio.
+
+    Runs the pyannote speaker-diarization pipeline on the audio file,
+    then aligns the resulting speaker turns with Whisper transcript
+    segments using temporal overlap.
+
+    Requires:
+        - ``pyannote.audio`` installed (optional dependency).
+        - A Hugging Face auth token with access to the pyannote model,
+          passed via ``auth_token`` or the ``PYANNOTE_AUTH_TOKEN`` env var.
+    """
+
+    def __init__(self, *, auth_token: str | None = None) -> None:
+        self._auth_token = auth_token or os.environ.get("PYANNOTE_AUTH_TOKEN")
+        self._pipeline: object | None = None  # lazy-loaded
+
+    @property
+    def strategy_id(self) -> str:
+        return PYANNOTE_STRATEGY_ID
+
+    # -- lazy pipeline loading -----------------------------------------------
+
+    def _get_pipeline(self) -> object:
+        """Return the pyannote pipeline, loading it on first call."""
+        if self._pipeline is not None:
+            return self._pipeline
+
+        try:
+            from pyannote.audio import Pipeline  # type: ignore[import-untyped]
+        except ImportError as exc:
+            raise RuntimeError(
+                "pyannote.audio is required for the pyannote_v1 strategy. "
+                "Install with: pip install pyannote.audio"
+            ) from exc
+
+        if not self._auth_token:
+            raise RuntimeError(
+                "A Hugging Face auth token is required for pyannote. "
+                "Set PYANNOTE_AUTH_TOKEN or pass auth_token to the constructor."
+            )
+
+        logger.info("Loading pyannote pipeline %s …", _PYANNOTE_MODEL)
+        self._pipeline = Pipeline.from_pretrained(
+            _PYANNOTE_MODEL,
+            use_auth_token=self._auth_token,
+        )
+        return self._pipeline
+
+    # -- core attribution ----------------------------------------------------
+
+    def attribute(
+        self,
+        segments: list[Segment],
+        *,
+        chunk_index: int | None = None,
+        audio_file: str | None = None,
+    ) -> AttributionResult:
+        """Run pyannote diarization and align with transcript segments."""
+        if not segments:
+            return AttributionResult(
+                segments=[],
+                strategy_id=self.strategy_id,
+                speaker_count=0,
+            )
+
+        if not audio_file:
+            raise ValueError(
+                "PyannoteStrategy requires an audio_file path. "
+                "Pass audio_file= when calling attribute()."
+            )
+
+        pipeline = self._get_pipeline()
+        diarization = pipeline(audio_file)  # type: ignore[operator]
+
+        # Collect speaker turns: [(start, end, label), ...]
+        speaker_turns: list[tuple[float, float, str]] = [
+            (turn.start, turn.end, speaker_label)
+            for turn, _, speaker_label in diarization.itertracks(yield_label=True)
+        ]
+
+        # Deterministic label mapping: pyannote's SPEAKER_00 → Speaker A, etc.
+        unique_speakers = sorted({t[2] for t in speaker_turns})
+        label_map = {s: _speaker_label(i) for i, s in enumerate(unique_speakers)}
+
+        attributed = _align_segments_to_turns(
+            segments, speaker_turns, label_map, chunk_index
+        )
+
+        speaker_count = len({s.speaker.label for s in attributed if s.speaker})
+
+        return AttributionResult(
+            segments=attributed,
+            strategy_id=self.strategy_id,
+            speaker_count=speaker_count,
+            metadata={
+                "model": _PYANNOTE_MODEL,
+                "diarization_turns": len(speaker_turns),
+            },
+        )
+
+
+def _align_segments_to_turns(
+    segments: list[Segment],
+    speaker_turns: list[tuple[float, float, str]],
+    label_map: dict[str, str],
+    chunk_index: int | None,
+) -> list[Segment]:
+    """Align transcript segments to diarization speaker turns by overlap.
+
+    For each segment, the speaker turn with the largest temporal overlap
+    is selected.  When no turn overlaps, the segment is marked
+    ``attribution_mode="unknown"`` with low confidence.
+    """
+    attributed: list[Segment] = []
+
+    for seg in segments:
+        best_speaker: str | None = None
+        best_overlap = 0.0
+
+        for turn_start, turn_end, speaker_label in speaker_turns:
+            overlap = min(seg.end, turn_end) - max(seg.start, turn_start)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = speaker_label
+
+        seg_duration = seg.end - seg.start
+
+        if best_speaker is not None and best_overlap > 0:
+            overlap_ratio = (
+                best_overlap / seg_duration if seg_duration > 0 else 0.0
+            )
+            # Scale confidence: 0.6 base + up to 0.35 from overlap ratio
+            confidence = round(min(0.95, 0.6 + 0.35 * overlap_ratio), 2)
+            mode = "confident" if overlap_ratio > 0.5 else "predicted"
+            speaker_info = SpeakerInfo(
+                label=label_map[best_speaker],
+                confidence=confidence,
+                attribution_mode=mode,
+            )
+        else:
+            speaker_info = SpeakerInfo(
+                label="Speaker ?",
+                confidence=0.1,
+                attribution_mode="unknown",
+            )
+
+        attributed.append(
+            Segment(
+                start=seg.start,
+                end=seg.end,
+                text=seg.text,
+                speaker=speaker_info,
+                chunk_index=chunk_index,
+            )
+        )
+
+    return attributed
+
+
+# ---------------------------------------------------------------------------
 # Strategy registry
 # ---------------------------------------------------------------------------
 
@@ -179,6 +359,7 @@ DEFAULT_STRATEGY = STRATEGY_ID
 
 _REGISTRY: dict[str, type[SpeakerAttributionStrategy]] = {
     STRATEGY_ID: PauseHeuristicStrategy,  # type: ignore[dict-item]
+    PYANNOTE_STRATEGY_ID: PyannoteStrategy,  # type: ignore[dict-item]
 }
 
 

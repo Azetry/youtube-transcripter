@@ -2,6 +2,9 @@
 
 Covers:
     - Pause-based heuristic attribution (short video)
+    - Pyannote post-hoc diarization strategy (mocked)
+    - Strategy registry (get_strategy / list_strategies)
+    - Alignment helper (_align_segments_to_turns)
     - Speaker-aware merge (long video / multi-chunk)
     - Chunk boundary uncertainty marking
     - Backward compatibility (attribution disabled)
@@ -9,13 +12,21 @@ Covers:
     - Low-confidence assignments distinguishable in output
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from src.transcript.models import Segment, SpeakerInfo, ChunkTranscript
 from src.transcript.speaker_attribution import (
+    PYANNOTE_STRATEGY_ID,
     STRATEGY_ID,
+    AttributionResult,
+    PyannoteStrategy,
+    _align_segments_to_turns,
     attribute_speakers,
     count_speakers,
+    get_strategy,
+    list_strategies,
     segments_to_dicts,
 )
 from src.transcript.merger import (
@@ -340,3 +351,244 @@ class TestSpeakerAwareMerge:
         assert short_conf < long_conf
         # Both are "predicted" (not "confident")
         assert all(s.speaker.attribution_mode == "predicted" for s in result)
+
+
+# ── Strategy registry tests ───────────────────────────────────────
+
+
+class TestStrategyRegistry:
+    def test_default_strategy_is_heuristic(self):
+        strategy = get_strategy()
+        assert strategy.strategy_id == STRATEGY_ID
+
+    def test_get_heuristic_by_name(self):
+        strategy = get_strategy("pause_heuristic_v1")
+        assert strategy.strategy_id == "pause_heuristic_v1"
+
+    def test_get_pyannote_by_name(self):
+        strategy = get_strategy("pyannote_v1")
+        assert strategy.strategy_id == PYANNOTE_STRATEGY_ID
+
+    def test_unknown_strategy_raises(self):
+        with pytest.raises(ValueError, match="Unknown speaker attribution strategy"):
+            get_strategy("nonexistent_backend")
+
+    def test_list_strategies_includes_both(self):
+        strategies = list_strategies()
+        assert "pause_heuristic_v1" in strategies
+        assert "pyannote_v1" in strategies
+
+
+# ── Alignment helper tests ────────────────────────────────────────
+
+
+class TestAlignSegmentsToTurns:
+    """Test the overlap-based alignment between segments and speaker turns."""
+
+    def test_perfect_overlap(self):
+        """Segment fully inside a single speaker turn → confident."""
+        segs = _make_segments([(1.0, 5.0, "hello")])
+        turns = [(0.0, 10.0, "SPEAKER_00")]
+        label_map = {"SPEAKER_00": "Speaker A"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        assert len(result) == 1
+        assert result[0].speaker.label == "Speaker A"
+        assert result[0].speaker.attribution_mode == "confident"
+        assert result[0].speaker.confidence >= 0.9
+
+    def test_partial_overlap_picks_best(self):
+        """Segment spans two turns — picks the one with more overlap."""
+        segs = _make_segments([(4.0, 10.0, "crosses boundary")])
+        turns = [
+            (0.0, 6.0, "SPEAKER_00"),   # overlap: 6-4 = 2s
+            (6.0, 12.0, "SPEAKER_01"),   # overlap: 10-6 = 4s
+        ]
+        label_map = {"SPEAKER_00": "Speaker A", "SPEAKER_01": "Speaker B"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        assert result[0].speaker.label == "Speaker B"
+
+    def test_no_overlap_marks_unknown(self):
+        """Segment outside all turns → unknown with low confidence."""
+        segs = _make_segments([(20.0, 25.0, "silence region")])
+        turns = [(0.0, 10.0, "SPEAKER_00")]
+        label_map = {"SPEAKER_00": "Speaker A"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        assert result[0].speaker.label == "Speaker ?"
+        assert result[0].speaker.attribution_mode == "unknown"
+        assert result[0].speaker.confidence == 0.1
+
+    def test_empty_turns_marks_all_unknown(self):
+        """No diarization turns at all → all segments unknown."""
+        segs = _make_segments([(0.0, 5.0, "hello")])
+        result = _align_segments_to_turns(segs, [], {}, chunk_index=None)
+        assert result[0].speaker.attribution_mode == "unknown"
+
+    def test_chunk_index_preserved(self):
+        segs = _make_segments([(0.0, 5.0, "hello")])
+        turns = [(0.0, 10.0, "SPEAKER_00")]
+        label_map = {"SPEAKER_00": "Speaker A"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=2)
+        assert result[0].chunk_index == 2
+
+    def test_multiple_speakers_mapped(self):
+        """Three segments across two speakers."""
+        segs = _make_segments([
+            (0.0, 3.0, "A talks"),
+            (3.0, 6.0, "B talks"),
+            (6.0, 9.0, "A talks again"),
+        ])
+        turns = [
+            (0.0, 3.0, "SPEAKER_00"),
+            (3.0, 6.0, "SPEAKER_01"),
+            (6.0, 9.0, "SPEAKER_00"),
+        ]
+        label_map = {"SPEAKER_00": "Speaker A", "SPEAKER_01": "Speaker B"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        labels = [s.speaker.label for s in result]
+        assert labels == ["Speaker A", "Speaker B", "Speaker A"]
+
+    def test_low_overlap_ratio_marks_predicted(self):
+        """When overlap ratio <= 0.5, mode should be 'predicted'."""
+        # Segment is 10s, but only 3s overlap with the turn
+        segs = _make_segments([(0.0, 10.0, "partially covered")])
+        turns = [(7.0, 10.0, "SPEAKER_00")]  # only 3s overlap out of 10s = 0.3
+        label_map = {"SPEAKER_00": "Speaker A"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        assert result[0].speaker.attribution_mode == "predicted"
+        assert result[0].speaker.confidence < 0.9
+
+
+# ── Pyannote strategy tests (mocked) ─────────────────────────────
+
+
+class TestPyannoteStrategy:
+    """Test PyannoteStrategy with mocked pyannote pipeline."""
+
+    def _make_mock_diarization(self, turns):
+        """Create a mock diarization result from (start, end, label) triples."""
+        mock_diarization = MagicMock()
+        track_items = []
+        for start, end, label in turns:
+            turn = MagicMock()
+            turn.start = start
+            turn.end = end
+            track_items.append((turn, None, label))
+        mock_diarization.itertracks.return_value = track_items
+        return mock_diarization
+
+    def test_empty_segments_returns_empty(self):
+        strategy = PyannoteStrategy(auth_token="fake-token")
+        result = strategy.attribute([])
+        assert result.segments == []
+        assert result.speaker_count == 0
+        assert result.strategy_id == "pyannote_v1"
+
+    def test_requires_audio_file(self):
+        strategy = PyannoteStrategy(auth_token="fake-token")
+        segs = _make_segments([(0.0, 5.0, "hello")])
+        with pytest.raises(ValueError, match="requires an audio_file"):
+            strategy.attribute(segs)
+
+    def test_missing_pyannote_raises_runtime_error(self):
+        strategy = PyannoteStrategy(auth_token="fake-token")
+        segs = _make_segments([(0.0, 5.0, "hello")])
+        with patch.dict("sys.modules", {"pyannote": None, "pyannote.audio": None}):
+            with pytest.raises(RuntimeError, match="pyannote.audio is required"):
+                strategy.attribute(segs, audio_file="/tmp/test.wav")
+
+    def test_missing_token_raises_runtime_error(self):
+        strategy = PyannoteStrategy(auth_token=None)
+        strategy._auth_token = None  # ensure no token
+        segs = _make_segments([(0.0, 5.0, "hello")])
+        # Mock successful import but no token
+        mock_pipeline_cls = MagicMock()
+        with patch.dict("sys.modules", {
+            "pyannote": MagicMock(),
+            "pyannote.audio": MagicMock(Pipeline=mock_pipeline_cls),
+        }):
+            with pytest.raises(RuntimeError, match="auth token is required"):
+                strategy.attribute(segs, audio_file="/tmp/test.wav")
+
+    def test_diarization_with_mocked_pipeline(self):
+        """Full flow: mocked pipeline → alignment → AttributionResult."""
+        mock_diarization = self._make_mock_diarization([
+            (0.0, 5.0, "SPEAKER_00"),
+            (5.0, 12.0, "SPEAKER_01"),
+        ])
+        mock_pipeline = MagicMock(return_value=mock_diarization)
+
+        strategy = PyannoteStrategy(auth_token="fake-token")
+        strategy._pipeline = mock_pipeline  # skip lazy loading
+
+        segs = _make_segments([
+            (0.0, 4.0, "First speaker here"),
+            (5.0, 10.0, "Second speaker now"),
+        ])
+
+        result = strategy.attribute(segs, audio_file="/tmp/test.wav")
+
+        assert isinstance(result, AttributionResult)
+        assert result.strategy_id == "pyannote_v1"
+        assert result.speaker_count == 2
+        assert len(result.segments) == 2
+        assert result.segments[0].speaker.label == "Speaker A"
+        assert result.segments[1].speaker.label == "Speaker B"
+        assert result.metadata["model"] == "pyannote/speaker-diarization-3.1"
+        assert result.metadata["diarization_turns"] == 2
+
+        mock_pipeline.assert_called_once_with("/tmp/test.wav")
+
+    def test_attribution_modes(self):
+        """High-overlap → confident, low-overlap → predicted."""
+        mock_diarization = self._make_mock_diarization([
+            (0.0, 10.0, "SPEAKER_00"),  # covers seg0 fully, seg1 partially
+        ])
+        mock_pipeline = MagicMock(return_value=mock_diarization)
+
+        strategy = PyannoteStrategy(auth_token="fake-token")
+        strategy._pipeline = mock_pipeline
+
+        segs = _make_segments([
+            (1.0, 5.0, "fully inside"),       # 100% overlap → confident
+            (8.0, 20.0, "mostly outside"),     # 2/12 = 16.7% overlap → predicted
+        ])
+
+        result = strategy.attribute(segs, audio_file="/tmp/test.wav")
+        assert result.segments[0].speaker.attribution_mode == "confident"
+        assert result.segments[1].speaker.attribution_mode == "predicted"
+
+    def test_chunk_index_threaded(self):
+        """chunk_index parameter is passed to output segments."""
+        mock_diarization = self._make_mock_diarization([
+            (0.0, 10.0, "SPEAKER_00"),
+        ])
+        mock_pipeline = MagicMock(return_value=mock_diarization)
+
+        strategy = PyannoteStrategy(auth_token="fake-token")
+        strategy._pipeline = mock_pipeline
+
+        segs = _make_segments([(0.0, 5.0, "hello")])
+        result = strategy.attribute(segs, chunk_index=3, audio_file="/tmp/test.wav")
+        assert result.segments[0].chunk_index == 3
+
+    def test_deterministic_label_ordering(self):
+        """Speaker labels are assigned in sorted order of pyannote labels."""
+        mock_diarization = self._make_mock_diarization([
+            (0.0, 5.0, "SPEAKER_02"),
+            (5.0, 10.0, "SPEAKER_00"),
+            (10.0, 15.0, "SPEAKER_01"),
+        ])
+        mock_pipeline = MagicMock(return_value=mock_diarization)
+
+        strategy = PyannoteStrategy(auth_token="fake-token")
+        strategy._pipeline = mock_pipeline
+
+        segs = _make_segments([
+            (0.0, 5.0, "first"),
+            (5.0, 10.0, "second"),
+            (10.0, 15.0, "third"),
+        ])
+        result = strategy.attribute(segs, audio_file="/tmp/test.wav")
+        # Sorted order: SPEAKER_00→A, SPEAKER_01→B, SPEAKER_02→C
+        labels = [s.speaker.label for s in result.segments]
+        assert labels == ["Speaker C", "Speaker A", "Speaker B"]
