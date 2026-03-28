@@ -1,0 +1,36 @@
+Follow-up for Speaker Attribution v2 — Unit 1 in repo `youtube-transcripter`.
+
+Repo:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+
+Linked local spec id:
+openspec-local-speaker-attribution-v2-real-diarization-20260328
+
+Decision from Friday / Azetry:
+**Do NOT delete `src/transcript/speaker_attribution.py`.**
+Do **NOT** convert this into a package-based rename that requires deleting the old file.
+
+Instead:
+> Implement the strategy abstraction using the existing single-file route.
+
+Goal:
+Complete Unit 1 by introducing a strategy abstraction while preserving backward compatibility and avoiding destructive file-structure changes.
+
+In scope:
+1. Keep `src/transcript/speaker_attribution.py` as the primary implementation file.
+2. Add strategy abstraction inside the existing file (or via non-destructive helper files if truly needed).
+3. Preserve heuristic behavior as explicit fallback/debug mode.
+4. Clean up any abandoned package-conversion scaffolding if it is not needed.
+5. Do not touch unrelated dirty files.
+6. Run relevant validation/tests.
+
+Do NOT:
+- delete the old file
+- perform package conversion that conflicts with current imports
+- integrate a real backend yet
+- broaden scope beyond Unit 1
+
+Expected deliverable:
+- single-file-compatible strategy seam
+- no destructive rename requirement
+- repo left in a clean, reviewable state for Unit 1

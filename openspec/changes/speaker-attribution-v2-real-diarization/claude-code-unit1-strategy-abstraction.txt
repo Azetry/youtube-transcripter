@@ -1,0 +1,51 @@
+Implement Speaker Attribution v2 — Unit 1 for repo `youtube-transcripter`.
+
+Repo:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+
+Linked local spec id:
+openspec-local-speaker-attribution-v2-real-diarization-20260328
+
+Primary OpenSpec change:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter/openspec/changes/speaker-attribution-v2-real-diarization/
+
+Task scope:
+Unit 1 — Strategy abstraction + heuristic fallback preservation
+
+Goal:
+Refactor the current speaker attribution implementation into an explicit strategy abstraction while preserving the current heuristic implementation as fallback/debug mode.
+
+Why this unit exists:
+- v1 already has heuristic attribution plumbing
+- v2 needs a clean seam before adding a real post-hoc backend
+- do NOT jump into backend integration in this unit
+
+In scope:
+1. Introduce a clear strategy abstraction for speaker attribution
+2. Preserve current heuristic behavior as one explicit strategy
+3. Thread strategy identifiers / version metadata through relevant models and orchestration
+4. Keep existing speaker attribution behavior backward compatible where practical
+5. Update/add focused tests for the new abstraction layer
+6. Run relevant validation/tests
+
+Suggested work areas:
+- `src/transcript/speaker_attribution.py` may evolve into a strategy-oriented module/package
+- `src/services/transcription_service.py`
+- artifact/job/storage metadata if needed for strategy persistence
+- signature/reuse behavior if strategy changes output determinism
+- tests around strategy dispatch and heuristic preservation
+
+Do NOT:
+- integrate a real diarization backend in this unit
+- implement provider-native or hybrid auto-routing
+- change the product boundary
+- add named speaker / Host-Guest inference
+- redesign unrelated acquisition / backup / deployment code
+- archive OpenSpec
+
+Expected deliverable:
+- strategy seam exists
+- heuristic is preserved as explicit fallback/debug mode
+- metadata reflects strategy selection cleanly
+- validation/tests pass
+- concise summary of what changed and what the next unit can now safely build on
