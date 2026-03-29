@@ -44,7 +44,7 @@ def _make_success_result() -> AcquisitionResult:
 
 
 def _make_decision(
-    route: FallbackRoute = FallbackRoute.DELEGATE_ALTERNATE_HOST,
+    route: FallbackRoute = FallbackRoute.MANUAL_FALLBACK,
     reason: str = "Auth required, credentials tried but failed.",
     category: FailureCategory = FailureCategory.AUTH_REQUIRED,
     wait_seconds: int = 0,
@@ -86,7 +86,7 @@ class TestBuildDiagnosticsDict:
         assert d["success"] is False
         assert d["failure_category"] == "auth_required"
         assert "YT_DLP_COOKIES_FILE" in d["operator_guidance"]
-        assert d["fallback"]["route"] == "delegate_alternate_host"
+        assert d["fallback"]["route"] == "manual_fallback"
         assert d["fallback"]["reason"] == decision.reason
         assert d["fallback"]["exhausted_modes"] == ["unauthenticated", "cookie_file"]
 
@@ -160,7 +160,7 @@ class TestFormatOperatorSummary:
         assert "FAILED" in text
         assert "2 attempt(s)" in text
         assert "auth_required" in text
-        assert "delegate_alternate_host" in text
+        assert "manual_fallback" in text
         assert decision.reason in text
         assert "Guidance:" in text
 

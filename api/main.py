@@ -27,8 +27,7 @@ from src.services.transcription_service import TranscriptionService
 from src.services.job_service import JobService
 from src.storage.schema import bootstrap
 from src.storage.sqlite_store import SQLiteStore
-
-from api.delegation import router as delegation_router
+from src.integrations.backup_health import check_backup_health
 
 
 # ============== Pydantic Models ==============
@@ -225,9 +224,6 @@ app.add_middleware(
 )
 
 
-app.include_router(delegation_router)
-
-
 # ============== API Endpoints ==============
 
 @app.get("/")
@@ -333,15 +329,11 @@ async def correct_text(text: str, context: Optional[str] = None):
 
 @app.get("/api/health")
 async def health_check():
-    """健康檢查"""
-    resp = {
-        "status": "healthy",
-        "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
-    }
-    service_role = os.getenv("SERVICE_ROLE")
-    if service_role:
-        resp["service_role"] = service_role
-    return resp
+    """健康檢查（OpenAI、可選 YouTube cookie 環境）。"""
+    st = check_backup_health()
+    body = st.to_dict()
+    body["status"] = "healthy" if st.healthy else "unhealthy"
+    return body
 
 
 if __name__ == "__main__":

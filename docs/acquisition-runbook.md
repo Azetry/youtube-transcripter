@@ -35,15 +35,15 @@ this-host strategies exhausted
   classify failure
         │
         ├─ AUTH_REQUIRED ──► auth available & untried? → ESCALATE_AUTH_THIS_HOST
-        │                    auth tried or unavailable? → DELEGATE_ALTERNATE_HOST
+        │                    auth tried or unavailable? → MANUAL_FALLBACK
         │
         ├─ TRANSIENT ──────► < 3 attempts? → RETRY_THIS_HOST
-        │                    ≥ 3 attempts? → DELEGATE_ALTERNATE_HOST
+        │                    ≥ 3 attempts? → MANUAL_FALLBACK
         │
         ├─ RATE_LIMITED ───► < 2 attempts? → WAIT_RETRY_THIS_HOST (30s backoff)
-        │                    ≥ 2 attempts? → DELEGATE_ALTERNATE_HOST
+        │                    ≥ 2 attempts? → MANUAL_FALLBACK
         │
-        ├─ GEO_BLOCKED ───► DELEGATE_ALTERNATE_HOST (needs different IP)
+        ├─ GEO_BLOCKED ───► MANUAL_FALLBACK (needs different IP / region)
         │
         ├─ UNAVAILABLE ────► ABORT (deleted/private/copyright — nothing helps)
         │
@@ -56,32 +56,19 @@ this-host strategies exhausted
 
 | Category | Typical yt-dlp Error | Operator Action |
 |----------|---------------------|-----------------|
-| `auth_required` | "Sign in to confirm", "login required", "confirm your age", "use --cookies" | Set `YT_DLP_COOKIES_FILE` or `YT_DLP_COOKIES_FROM_BROWSER`. If auth already configured and still fails, the alternate host likely has fresher cookies. |
+| `auth_required` | "Sign in to confirm", "login required", "confirm your age", "use --cookies" | Set `YT_DLP_COOKIES_FILE` or `YT_DLP_COOKIES_FROM_BROWSER`. If auth is configured and still fails, refresh cookies or try another network. |
 | `geo_blocked` | "not available in your country", "geo-restricted" | No local fix — requires acquisition from a host in an allowed region. |
 | `unavailable` | "video unavailable", "has been removed", "private video", "copyright", HTTP 404 | Video is gone. No retry will help. Confirm the URL is correct. |
-| `rate_limited` | HTTP 429, "too many requests", "rate-limit" | Wait and retry. If persistent, rotate IP or delegate to alternate host. Reduce request frequency. |
+| `rate_limited` | HTTP 429, "too many requests", "rate-limit" | Wait and retry. If persistent, rotate IP or reduce request frequency. |
 | `transient` | "connection reset", "timed out", HTTP 5xx, "page needs to be reloaded" | Usually self-resolving. Automatic retry handles most cases. If repeated, check network connectivity. |
 | `format_error` | "format not available", "no suitable format" | Try different `--format` / `--quality` settings. Some videos lack certain codecs. |
 | `unknown` | *(anything not matching above patterns)* | Check raw error in diagnostics output. May need a new classification pattern in `src/models/acquisition.py`. |
 
-## Alternate-Host Delegation
+## Manual fallback (no remote delegation)
 
-When the fallback policy returns `DELEGATE_ALTERNATE_HOST`, the orchestrator builds an `AlternateHostRequest` (see `src/integrations/alternate_host.py`) containing:
-- The YouTube URL
-- Format/quality preferences
-- A `FailureContext` summarising what was already tried
+When the policy returns `MANUAL_FALLBACK`, acquisition has failed on this host after structured retries. There is **no** automatic HTTP handoff to another service instance. Operators should use diagnostics (`acquire_only`, `format_operator_summary`) and adjust environment, network, or cookies as appropriate.
 
-**Transport is not yet implemented.** The request object is attached to the `AcquisitionError` exception so the caller (CLI, API, or a future automation layer) can inspect and act on it.
-
-To check if a failed transcription wanted to delegate:
-
-```python
-try:
-    service.run(url)
-except AcquisitionError as e:
-    if e.alternate_host_request:
-        print("Delegation requested:", e.alternate_host_request.to_json())
-```
+The `AlternateHostRequest` types in `src/integrations/alternate_host.py` remain for **serialization / contracts** if you build your own tooling; orchestration does not attach them to `AcquisitionError`.
 
 ## Diagnostics
 
@@ -121,6 +108,6 @@ This prints a structured text block showing: result status, each attempt with it
 | `src/models/acquisition.py` | Enums, failure patterns, classification |
 | `src/services/acquisition_service.py` | This-host strategy execution |
 | `src/services/fallback_policy.py` | Failure → route decision engine |
-| `src/integrations/alternate_host.py` | Remote handoff request/response contract |
-| `src/services/transcription_service.py` | Pipeline orchestration (wires H2-H4) |
+| `src/integrations/alternate_host.py` | Optional handoff request/response types (not wired to remote delegation) |
+| `src/services/transcription_service.py` | Pipeline orchestration |
 | `src/services/acquisition_diagnostics.py` | Operator-facing summary formatter |

@@ -14,7 +14,7 @@
 - **Docker 部署** - 可用 Docker Compose 快速部署
 - **長影片流程** - 支援 chunking、merge / dedupe 與長影片逐字稿流程
 - **說話者標註** - 通用標籤（Speaker A/B/…）：預設**停頓啟發式**，可選 **pyannote** 事後分段（`pyannote_v1`）；非具名說話者辨識
-- **Acquisition Hardening** - 支援取得 YouTube 時的診斷、fallback policy 與 backup-service delegation 基礎能力
+- **Acquisition Hardening** - 取得 YouTube 時的診斷與 fallback policy（僅本機，無遠端委派）
 
 ## 架構
 
@@ -129,15 +129,13 @@ python main.py --help
 | `/api/video/info` | POST | 取得影片資訊 |
 | `/api/transcribe` | POST | 啟動轉錄任務 |
 | `/api/task/{id}` | GET | 查詢任務狀態 |
-| `/delegate/health` | GET | Backup-service 健康檢查 |
-| `/delegate/transcribe` | POST | Backup-service delegated transcription |
 
 ## 文件
 
 - Acquisition reasoning / failure classes / fallback logic：
   - `docs/acquisition-runbook.md`
-- A/B backup-service 部署與驗收操作手冊：
-  - `docs/backup-service-deployment.md`
+- 已移除的 backup HTTP 委派（說明）：
+  - `docs/backup-delegation-removed.md`
 - 已合併的 OpenSpec **主規格**：
   - `openspec/specs/`
 - 若仍存在的進行中 OpenSpec **change**：
@@ -152,42 +150,32 @@ python main.py --help
 | `OPENAI_API_KEY` | OpenAI API key | Yes |
 | `PYANNOTE_AUTH_TOKEN` | Hugging Face token（`pyannote_v1`、gated 模型） | 僅使用 pyannote 策略時 |
 | `HF_TOKEN` | 選填；部分 Hugging Face 工具亦會讀取 | No |
-| `BACKUP_SERVICE_URL` | A→B delegation 用的 backup-service URL | No |
-| `BACKUP_SERVICE_TOKEN` | A/B 共用的 bearer token | No |
-| `SERVICE_ROLE` | 服務角色標記（例如 `backup`） | No |
+| `SERVICE_ROLE` | 選填；會反映在 `/api/health` | No |
 | `YT_DLP_COOKIES_FILE` | Netscape 格式 cookies 檔案 | No |
 | `YT_DLP_COOKIES_FROM_BROWSER` | 從瀏覽器讀 cookies 的 browser 名稱 | No |
 
 請複製 `.env.example` 為 `.env` 後編輯；勿將真實金鑰提交至版本庫。
 
-## Backup Deployment
+### 執行測試
 
-若要把這個 repo 當成 B 端 backup service（只跑 backend、不啟 frontend）：
+`tests/` 內的測試會建立 `TranscriptionService`，進而在 `WhisperTranscriber` 初始化時建立 OpenAI client。**執行 `pytest` 前請在環境中設定 `OPENAI_API_KEY`**（單元測試可用占位值即可，例如 `test`；實際不會對外呼叫 API）。
 
 ```bash
-export BACKUP_SERVICE_TOKEN=<shared-secret>
-export OPENAI_API_KEY=<key>
-
-docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d
+pip install -r requirements.txt
+export OPENAI_API_KEY=test
+python -m pytest tests/
 ```
-
-此模式會：
-- 對外 publish backend `8000`
-- 設定 `SERVICE_ROLE=backup`
-- 不啟 frontend
-
-更多細節請看：`docs/backup-service-deployment.md`
 
 ## 目前專案狀態
 
-目前包含：長影片逐字稿 pipeline、說話者標註（啟發式與可選 pyannote）、YouTube acquisition hardening、backup-service fallback MVP 等。已完成封存的 OpenSpec 變更見 `openspec/changes/archive/`，合併後主規格見 `openspec/specs/`。
+目前包含：長影片逐字稿 pipeline、說話者標註（啟發式與可選 pyannote）、YouTube acquisition hardening 等。已完成封存的 OpenSpec 變更見 `openspec/changes/archive/`，合併後主規格見 `openspec/specs/`。
 
 ## 限制
 
 - Whisper API 有 25MB 檔案大小限制；目前音訊品質預設壓低到 64kbps 以符合限制
 - 轉錄品質仍受音訊清晰度與 Whisper 能力影響
 - GPT 校正仍可能改動語意，建議人工審閱
-- YouTube acquisition 的穩定度仍可能受 host / network / IP reputation 影響；請搭配 acquisition runbook 與 backup deployment guide 使用
+- YouTube acquisition 的穩定度仍可能受 host / network / IP reputation 影響；請搭配 acquisition runbook 使用
 
 ## 授權
 

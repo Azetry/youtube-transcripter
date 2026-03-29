@@ -7,9 +7,9 @@ operator-visible reason, and enough metadata for H4/H5 to act on.
 
 Design principles:
   1. Improve this-host path first (retry / escalate auth).
-  2. Then prefer alternate always-on host (stub — transport built in H4).
-  3. Local / manual fallback as last resort.
-  4. Decisions are semi-automatic: every decision carries a human-readable
+  2. When this host cannot proceed, surface ``MANUAL_FALLBACK`` with a clear reason
+     (no remote full-pipeline delegation).
+  3. Decisions are semi-automatic: every decision carries a human-readable
      reason so operators can audit the routing logic.
 """
 
@@ -36,7 +36,6 @@ class FallbackRoute(str, Enum):
     RETRY_THIS_HOST = "retry_this_host"
     ESCALATE_AUTH_THIS_HOST = "escalate_auth_this_host"
     WAIT_RETRY_THIS_HOST = "wait_retry_this_host"
-    DELEGATE_ALTERNATE_HOST = "delegate_alternate_host"
     MANUAL_FALLBACK = "manual_fallback"
     ABORT = "abort"
 
@@ -124,17 +123,15 @@ def _route_by_category(
                 exhausted_modes=exhausted,
             )
         if has_auth and tried_auth:
-            # Auth was tried and still failed → try alternate host
             return FallbackDecision(
-                route=FallbackRoute.DELEGATE_ALTERNATE_HOST,
-                reason="Auth required, credentials tried but failed — delegating to alternate host.",
+                route=FallbackRoute.MANUAL_FALLBACK,
+                reason="Auth required and credentials were tried but failed — try another network, refresh cookies, or another machine.",
                 failure_category=category,
                 exhausted_modes=exhausted,
             )
-        # No auth configured at all
         return FallbackDecision(
-            route=FallbackRoute.DELEGATE_ALTERNATE_HOST,
-            reason="Auth required but no credentials configured on this host — delegating to alternate host.",
+            route=FallbackRoute.MANUAL_FALLBACK,
+            reason="Auth required but no YouTube cookies configured on this host — set YT_DLP_COOKIES_FILE or YT_DLP_COOKIES_FROM_BROWSER, or run on another host.",
             failure_category=category,
             exhausted_modes=exhausted,
         )
@@ -152,8 +149,8 @@ def _route_by_category(
                 exhausted_modes=exhausted,
             )
         return FallbackDecision(
-            route=FallbackRoute.DELEGATE_ALTERNATE_HOST,
-            reason="Transient failure persisted after multiple attempts — delegating to alternate host.",
+            route=FallbackRoute.MANUAL_FALLBACK,
+            reason="Transient failure persisted after multiple attempts — retry later or retry from another network/host.",
             failure_category=category,
             exhausted_modes=exhausted,
         )
@@ -170,8 +167,8 @@ def _route_by_category(
                 exhausted_modes=exhausted,
             )
         return FallbackDecision(
-            route=FallbackRoute.DELEGATE_ALTERNATE_HOST,
-            reason="Rate-limited repeatedly — delegating to alternate host (different IP).",
+            route=FallbackRoute.MANUAL_FALLBACK,
+            reason="Rate-limited repeatedly — wait and retry, or use another IP/host.",
             failure_category=category,
             exhausted_modes=exhausted,
         )
@@ -179,8 +176,8 @@ def _route_by_category(
     # --- GEO_BLOCKED ---
     if category == FailureCategory.GEO_BLOCKED:
         return FallbackDecision(
-            route=FallbackRoute.DELEGATE_ALTERNATE_HOST,
-            reason="Geo-blocked on this host — alternate host in a different region may succeed.",
+            route=FallbackRoute.MANUAL_FALLBACK,
+            reason="Geo-blocked on this host — try a VPN/region that can access the video, or another machine.",
             failure_category=category,
             exhausted_modes=exhausted,
         )

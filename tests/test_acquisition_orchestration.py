@@ -1,8 +1,8 @@
 """Integration tests for H5 acquisition orchestration glue.
 
-Verifies that TranscriptionService wires H2 (acquisition service),
-H3 (fallback policy), and H4 (alternate-host contract) together
-correctly without hitting real YouTube or Whisper APIs.
+Verifies that TranscriptionService wires H2 (acquisition service) and
+H3 (fallback policy) together correctly without hitting real YouTube or
+Whisper APIs.
 """
 
 from unittest.mock import MagicMock, patch
@@ -86,8 +86,6 @@ class TestAcquireOnlySuccess:
         assert outcome.success is True
         assert outcome.video_info is vi
         assert outcome.fallback_decision is None
-        assert outcome.alternate_host_request is None
-        assert outcome.diagnostics["success"] is True
 
     def test_success_records_diagnostics(self):
         svc = TranscriptionService()
@@ -106,9 +104,8 @@ class TestAcquireOnlySuccess:
 # ---------------------------------------------------------------------------
 
 class TestAcquireOnlyFailure:
-    def test_auth_required_no_auth_delegates_to_alternate_host(self):
-        """When auth is required but not configured, H3 should recommend
-        alternate-host delegation, and H5 should build the H4 request."""
+    def test_auth_required_no_auth_manual_fallback(self):
+        """When auth is required but not configured, H3 recommends manual fallback."""
         svc = TranscriptionService(originator="test-host")
         svc.acquisition_service.acquire = MagicMock(
             return_value=_make_failure_result("Sign in to confirm your age"),
@@ -119,13 +116,9 @@ class TestAcquireOnlyFailure:
 
         assert outcome.success is False
         assert outcome.fallback_decision is not None
-        assert outcome.fallback_decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
-        assert outcome.alternate_host_request is not None
-        assert outcome.alternate_host_request.url == "https://www.youtube.com/watch?v=test123"
-        assert outcome.alternate_host_request.originator == "test-host"
-        assert outcome.alternate_host_request.failure_context is not None
+        assert outcome.fallback_decision.route == FallbackRoute.MANUAL_FALLBACK
 
-    def test_geo_blocked_delegates_to_alternate_host(self):
+    def test_geo_blocked_manual_fallback(self):
         svc = TranscriptionService()
         svc.acquisition_service.acquire = MagicMock(
             return_value=_make_failure_result("Video not available in your country"),
@@ -135,12 +128,11 @@ class TestAcquireOnlyFailure:
             outcome = svc.acquire_only("https://www.youtube.com/watch?v=test123")
 
         assert outcome.success is False
-        assert outcome.fallback_decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
-        assert outcome.alternate_host_request is not None
+        assert outcome.fallback_decision.route == FallbackRoute.MANUAL_FALLBACK
         assert outcome.fallback_decision.failure_category == FailureCategory.GEO_BLOCKED
 
-    def test_unavailable_aborts_no_alternate_request(self):
-        """Unavailable videos should ABORT — no point delegating."""
+    def test_unavailable_aborts(self):
+        """Unavailable videos should ABORT."""
         svc = TranscriptionService()
         svc.acquisition_service.acquire = MagicMock(
             return_value=_make_failure_result("Video unavailable"),
@@ -151,9 +143,8 @@ class TestAcquireOnlyFailure:
 
         assert outcome.success is False
         assert outcome.fallback_decision.route == FallbackRoute.ABORT
-        assert outcome.alternate_host_request is None
 
-    def test_format_error_manual_fallback_no_alternate_request(self):
+    def test_format_error_manual_fallback(self):
         svc = TranscriptionService()
         svc.acquisition_service.acquire = MagicMock(
             return_value=_make_failure_result("Requested format not available"),
@@ -164,7 +155,6 @@ class TestAcquireOnlyFailure:
 
         assert outcome.success is False
         assert outcome.fallback_decision.route == FallbackRoute.MANUAL_FALLBACK
-        assert outcome.alternate_host_request is None
 
     def test_failure_diagnostics_populated(self):
         svc = TranscriptionService()
@@ -227,8 +217,7 @@ class TestRunFailurePath:
         err = exc_info.value
         assert err.acquisition_result is not None
         assert err.fallback_decision is not None
-        assert err.fallback_decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
-        assert err.alternate_host_request is not None
+        assert err.fallback_decision.route == FallbackRoute.MANUAL_FALLBACK
         assert "Sign in" not in str(err)  # raw error shouldn't leak as the message
         assert "Acquisition failed" in str(err)
 
@@ -244,44 +233,6 @@ class TestRunFailurePath:
 
         err = exc_info.value
         assert err.fallback_decision.route == FallbackRoute.ABORT
-        assert err.alternate_host_request is None
-
-
-# ---------------------------------------------------------------------------
-# H4 request construction from orchestration
-# ---------------------------------------------------------------------------
-
-class TestAlternateHostRequestConstruction:
-    def test_request_carries_failure_context(self):
-        svc = TranscriptionService(originator="node-01")
-        svc.acquisition_service.acquire = MagicMock(
-            return_value=_make_failure_result("Sign in to confirm your age"),
-        )
-
-        with patch("src.services.fallback_policy.auth_configured", return_value=False):
-            outcome = svc.acquire_only("https://www.youtube.com/watch?v=test123")
-
-        req = outcome.alternate_host_request
-        assert req is not None
-        assert req.originator == "node-01"
-        assert req.failure_context is not None
-        assert req.failure_context.last_category == FailureCategory.AUTH_REQUIRED
-        assert AcquisitionMode.UNAUTHENTICATED in req.failure_context.exhausted_modes
-
-    def test_request_serializes_to_json(self):
-        """The H4 request should be JSON-serializable for wire transport."""
-        svc = TranscriptionService(originator="node-01")
-        svc.acquisition_service.acquire = MagicMock(
-            return_value=_make_failure_result("Not available in your country"),
-        )
-
-        with patch("src.services.fallback_policy.auth_configured", return_value=False):
-            outcome = svc.acquire_only("https://www.youtube.com/watch?v=test123")
-
-        req = outcome.alternate_host_request
-        json_str = req.to_json()
-        assert '"url"' in json_str
-        assert "test123" in json_str
 
 
 # ---------------------------------------------------------------------------

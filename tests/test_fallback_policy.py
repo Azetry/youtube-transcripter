@@ -98,23 +98,23 @@ class TestAuthRequired:
         assert "escalat" in decision.reason.lower()
 
     @patch("src.services.fallback_policy.auth_configured", return_value=True)
-    def test_auth_tried_and_failed_delegates(self, _mock_auth):
+    def test_auth_tried_and_failed_manual_fallback(self, _mock_auth):
         result = _make_result(attempts=[
             _failed_attempt(mode=AcquisitionMode.UNAUTHENTICATED, category=FailureCategory.AUTH_REQUIRED),
             _failed_attempt(mode=AcquisitionMode.COOKIE_FILE, category=FailureCategory.AUTH_REQUIRED),
         ])
         decision = decide(result)
-        assert decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
+        assert decision.route == FallbackRoute.MANUAL_FALLBACK
         assert "tried" in decision.reason.lower() or "failed" in decision.reason.lower()
 
     @patch("src.services.fallback_policy.auth_configured", return_value=False)
-    def test_no_auth_configured_delegates(self, _mock_auth):
+    def test_no_auth_configured_manual_fallback(self, _mock_auth):
         result = _make_result(attempts=[
             _failed_attempt(mode=AcquisitionMode.UNAUTHENTICATED, category=FailureCategory.AUTH_REQUIRED),
         ])
         decision = decide(result)
-        assert decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
-        assert "no credentials" in decision.reason.lower()
+        assert decision.route == FallbackRoute.MANUAL_FALLBACK
+        assert "cookie" in decision.reason.lower() or "yt_dlp" in decision.reason.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -132,14 +132,14 @@ class TestTransient:
         assert decision.retry_mode == AcquisitionMode.UNAUTHENTICATED
 
     @patch("src.services.fallback_policy.auth_configured", return_value=False)
-    def test_repeated_transient_delegates(self, _mock_auth):
+    def test_repeated_transient_manual_fallback(self, _mock_auth):
         result = _make_result(attempts=[
             _failed_attempt(category=FailureCategory.TRANSIENT),
             _failed_attempt(category=FailureCategory.TRANSIENT),
             _failed_attempt(category=FailureCategory.TRANSIENT),
         ])
         decision = decide(result)
-        assert decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
+        assert decision.route == FallbackRoute.MANUAL_FALLBACK
 
 
 # ---------------------------------------------------------------------------
@@ -157,13 +157,13 @@ class TestRateLimited:
         assert decision.wait_seconds > 0
 
     @patch("src.services.fallback_policy.auth_configured", return_value=False)
-    def test_repeated_rate_limit_delegates(self, _mock_auth):
+    def test_repeated_rate_limit_manual_fallback(self, _mock_auth):
         result = _make_result(attempts=[
             _failed_attempt(category=FailureCategory.RATE_LIMITED),
             _failed_attempt(category=FailureCategory.RATE_LIMITED),
         ])
         decision = decide(result)
-        assert decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
+        assert decision.route == FallbackRoute.MANUAL_FALLBACK
 
 
 # ---------------------------------------------------------------------------
@@ -172,12 +172,12 @@ class TestRateLimited:
 
 class TestGeoBlocked:
     @patch("src.services.fallback_policy.auth_configured", return_value=False)
-    def test_geo_blocked_always_delegates(self, _mock_auth):
+    def test_geo_blocked_manual_fallback(self, _mock_auth):
         result = _make_result(attempts=[
             _failed_attempt(category=FailureCategory.GEO_BLOCKED),
         ])
         decision = decide(result)
-        assert decision.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
+        assert decision.route == FallbackRoute.MANUAL_FALLBACK
         assert "geo" in decision.reason.lower()
 
 
@@ -263,11 +263,11 @@ class TestDecisionStructure:
 # ---------------------------------------------------------------------------
 
 class TestPreferenceOrder:
-    """Verify the policy respects: this-host first → alternate host → manual."""
+    """Verify the policy respects: this-host retries first, then manual operator path."""
 
     @patch("src.services.fallback_policy.auth_configured", return_value=True)
     @patch.dict("os.environ", {"YT_DLP_COOKIES_FILE": "/tmp/c.txt"})
-    def test_auth_required_tries_this_host_before_alternate(self, _mock_auth):
+    def test_auth_required_tries_this_host_before_manual(self, _mock_auth):
         """First attempt at auth_required with auth available → stay on this host."""
         result = _make_result(attempts=[
             _failed_attempt(mode=AcquisitionMode.UNAUTHENTICATED, category=FailureCategory.AUTH_REQUIRED),
@@ -276,22 +276,22 @@ class TestPreferenceOrder:
         assert d.route == FallbackRoute.ESCALATE_AUTH_THIS_HOST
 
     @patch("src.services.fallback_policy.auth_configured", return_value=True)
-    def test_auth_required_exhausted_goes_alternate(self, _mock_auth):
-        """After auth tried and failed → alternate host."""
+    def test_auth_required_exhausted_manual_fallback(self, _mock_auth):
+        """After auth tried and failed → manual fallback (no remote delegation)."""
         result = _make_result(attempts=[
             _failed_attempt(mode=AcquisitionMode.UNAUTHENTICATED, category=FailureCategory.AUTH_REQUIRED),
             _failed_attempt(mode=AcquisitionMode.COOKIE_FILE, category=FailureCategory.AUTH_REQUIRED),
         ])
         d = decide(result)
-        assert d.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
+        assert d.route == FallbackRoute.MANUAL_FALLBACK
 
     @patch("src.services.fallback_policy.auth_configured", return_value=False)
-    def test_transient_exhausted_goes_alternate_not_manual(self, _mock_auth):
-        """After 3 transient failures → alternate host (not manual)."""
+    def test_transient_exhausted_manual_fallback(self, _mock_auth):
+        """After 3 transient failures → manual fallback."""
         result = _make_result(attempts=[
             _failed_attempt(category=FailureCategory.TRANSIENT),
             _failed_attempt(category=FailureCategory.TRANSIENT),
             _failed_attempt(category=FailureCategory.TRANSIENT),
         ])
         d = decide(result)
-        assert d.route == FallbackRoute.DELEGATE_ALTERNATE_HOST
+        assert d.route == FallbackRoute.MANUAL_FALLBACK

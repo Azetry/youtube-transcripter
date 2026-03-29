@@ -595,6 +595,9 @@ class TestPyannoteStrategy:
     def _make_mock_diarization(self, turns):
         """Create a mock diarization result from (start, end, label) triples."""
         mock_diarization = MagicMock()
+        # Avoid MagicMock auto-attr `speaker_diarization` shadowing the legacy
+        # Annotation path in _pyannote_annotation (must iterate on this object).
+        mock_diarization.speaker_diarization = None
         track_items = []
         for start, end, label in turns:
             turn = MagicMock()

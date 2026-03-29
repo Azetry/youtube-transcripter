@@ -50,7 +50,6 @@ _ROUTE_LABELS: dict[FallbackRoute, str] = {
     FallbackRoute.RETRY_THIS_HOST: "Retry on this host (same mode)",
     FallbackRoute.ESCALATE_AUTH_THIS_HOST: "Retry on this host with auth credentials",
     FallbackRoute.WAIT_RETRY_THIS_HOST: "Wait then retry on this host",
-    FallbackRoute.DELEGATE_ALTERNATE_HOST: "Delegate to alternate acquisition host",
     FallbackRoute.MANUAL_FALLBACK: "Manual operator intervention required",
     FallbackRoute.ABORT: "No further action — acquisition cannot proceed",
 }
@@ -107,7 +106,7 @@ def format_operator_summary(
           1. unauthenticated  FAIL  auth_required  "Sign in to confirm..."
           2. cookie_file      FAIL  auth_required  "Sign in to confirm..."
         Failure: auth_required
-        Decision: delegate_alternate_host
+        Decision: manual_fallback
           Reason: Auth required, credentials tried but failed.
         Guidance: Configure YT_DLP_COOKIES_FILE or ...
     """

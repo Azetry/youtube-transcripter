@@ -1,13 +1,4 @@
-"""Health-check support for the backup service.
-
-Unit H7a: defines the health response shape and a builder for the
-backup service's GET /health endpoint.
-
-The health check confirms:
-  1. The service is running and accepting requests.
-  2. Whether required dependencies (OpenAI key, token) are configured.
-  3. Whether YouTube auth env is configured for auth-gated extraction.
-"""
+"""Runtime health snapshot for diagnostics (OpenAI, optional YouTube auth env)."""
 
 from __future__ import annotations
 
@@ -15,23 +6,13 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from src.integrations.backup_auth import get_configured_token
-
 
 @dataclass(frozen=True)
 class BackupHealthStatus:
-    """Health-check response payload for the backup service.
+    """Structured health payload for `/api/health` and operators."""
 
-    Attributes:
-        healthy: Overall health flag.
-        service: Service identifier.
-        auth_configured: Whether a backup-service bearer token is set.
-        openai_configured: Whether an OpenAI API key is set.
-        detail: Optional human-readable detail on unhealthy state.
-    """
     healthy: bool
-    service: str = "youtube-transcripter-backup"
-    auth_configured: bool = False
+    service: str = "youtube-transcripter"
     openai_configured: bool = False
     yt_auth_configured: bool = False
     yt_auth_mode: Optional[str] = None
@@ -42,7 +23,6 @@ class BackupHealthStatus:
         d = {
             "healthy": self.healthy,
             "service": self.service,
-            "auth_configured": self.auth_configured,
             "openai_configured": self.openai_configured,
             "yt_auth_configured": self.yt_auth_configured,
         }
@@ -56,8 +36,7 @@ class BackupHealthStatus:
 
 
 def check_backup_health() -> BackupHealthStatus:
-    """Build a health status by inspecting the runtime environment."""
-    token_ok = get_configured_token() is not None
+    """Inspect env for core transcription and optional yt-dlp cookie modes."""
     openai_ok = bool(os.environ.get("OPENAI_API_KEY", "").strip())
 
     cookies_file = os.environ.get("YT_DLP_COOKIES_FILE", "").strip()
@@ -69,22 +48,15 @@ def check_backup_health() -> BackupHealthStatus:
         yt_auth_mode = "cookie_browser"
     yt_auth_ok = yt_auth_mode is not None
 
-    healthy = token_ok and openai_ok
-
+    healthy = openai_ok
     detail = None
     if not healthy:
-        missing = []
-        if not token_ok:
-            missing.append("BACKUP_SERVICE_TOKEN")
-        if not openai_ok:
-            missing.append("OPENAI_API_KEY")
-        detail = f"missing env: {', '.join(missing)}"
+        detail = "missing env: OPENAI_API_KEY"
 
     service_role = os.environ.get("SERVICE_ROLE") or None
 
     return BackupHealthStatus(
         healthy=healthy,
-        auth_configured=token_ok,
         openai_configured=openai_ok,
         yt_auth_configured=yt_auth_ok,
         yt_auth_mode=yt_auth_mode,

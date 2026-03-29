@@ -14,7 +14,7 @@ A powerful YouTube video transcription tool that integrates OpenAI Whisper API f
 - **Docker Deployment** - One-click deployment with Docker Compose
 - **Long-video Pipeline** - Chunking, merge/dedupe, and long-video transcript processing support
 - **Speaker Attribution** - Generic speaker labels (Speaker A/B/…): default **pause heuristic**, or optional **pyannote** post-hoc diarization (`pyannote_v1`); not named-speaker recognition
-- **Acquisition Hardening** - Structured acquisition diagnostics, fallback policy, and backup-service delegation foundation
+- **Acquisition Hardening** - Structured acquisition diagnostics and fallback policy (local host only; no remote delegation)
 
 ## Architecture
 
@@ -130,15 +130,13 @@ python main.py --help
 | `/api/video/info` | POST | Get video information |
 | `/api/transcribe` | POST | Start transcription task |
 | `/api/task/{id}` | GET | Get task status |
-| `/delegate/health` | GET | Backup-service health check |
-| `/delegate/transcribe` | POST | Backup-service delegated transcription |
 
 ## Documentation
 
 - Acquisition reasoning / failure classes / fallback logic:
   - `docs/acquisition-runbook.md`
-- A/B backup-service deployment and acceptance guide:
-  - `docs/backup-service-deployment.md`
+- Removed backup HTTP delegation (historical):
+  - `docs/backup-delegation-removed.md`
 - Consolidated OpenSpec **specs** (after archiving completed changes):
   - `openspec/specs/`
 - Remaining active OpenSpec **change** (if any):
@@ -170,38 +168,32 @@ python main.py --help
 | `OPENAI_API_KEY` | OpenAI API key | Yes |
 | `PYANNOTE_AUTH_TOKEN` | Hugging Face token for `pyannote_v1` (gated models) | Only for pyannote strategy |
 | `HF_TOKEN` | Optional; some Hugging Face tooling also reads this | No |
-| `BACKUP_SERVICE_URL` | Backup-service base URL for A→B delegation | No |
-| `BACKUP_SERVICE_TOKEN` | Shared bearer token for backup-service delegation | No |
-| `SERVICE_ROLE` | Service role marker (e.g. `backup`); reflected in health output | No |
+| `SERVICE_ROLE` | Optional marker; reflected in `/api/health` | No |
 | `YT_DLP_COOKIES_FILE` | Netscape-format cookies file for authenticated extraction | No |
 | `YT_DLP_COOKIES_FROM_BROWSER` | Browser name for cookie extraction | No |
 
 Copy `.env.example` to `.env` and edit; never commit real secrets.
 
-## Backup Deployment
+### Running tests
 
-To run this repo as a backup (B) service — backend only, no frontend:
+The suite under `tests/` constructs `TranscriptionService`, which initializes the OpenAI client during `WhisperTranscriber` setup. **Set `OPENAI_API_KEY` in the environment** before `pytest` (a placeholder such as `test` is enough for unit tests; network calls are mocked).
 
 ```bash
-export BACKUP_SERVICE_TOKEN=<shared-secret>
-export OPENAI_API_KEY=<key>
-
-docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d
+pip install -r requirements.txt
+export OPENAI_API_KEY=test
+python -m pytest tests/
 ```
-
-This publishes the backend on port 8000 with `SERVICE_ROLE=backup` and disables the frontend.
-See `docs/backup-service-deployment.md` for the full A/B deployment and acceptance guide.
 
 ## Current Project State
 
-This repo includes: long-video transcript pipeline, speaker attribution (heuristic + optional pyannote), YouTube acquisition hardening, and backup-service fallback MVP. Completed OpenSpec changes are under `openspec/changes/archive/` with merged specs in `openspec/specs/`.
+This repo includes: long-video transcript pipeline, speaker attribution (heuristic + optional pyannote), and YouTube acquisition hardening. Completed OpenSpec changes are under `openspec/changes/archive/` with merged specs in `openspec/specs/`.
 
 ## Limitations
 
 - Whisper API has a 25MB file size limit; audio quality is set to 64kbps to comply
 - Transcription quality depends on audio clarity and Whisper model capabilities
 - GPT corrections may alter original meaning; manual review is recommended
-- YouTube acquisition reliability may still vary by host/network/IP reputation; see the acquisition runbook and backup-service deployment guide
+- YouTube acquisition reliability may still vary by host/network/IP reputation; see the acquisition runbook
 
 ## License
 
