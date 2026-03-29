@@ -1,0 +1,23 @@
+# Speaker attribution extras — GPU/CUDA environment
+#
+# Usage:
+#   pip install -r requirements.txt -r requirements-speaker-gpu.txt
+#
+# IMPORTANT:
+# - This file assumes you will adjust the index URL / wheel source if needed
+#   to match your CUDA runtime and host driver stack.
+# - If your environment already manages torch/torchaudio separately,
+#   you may install only `pyannote.audio`, `torchcodec`, and `huggingface_hub`.
+#
+# If your CUDA runtime differs, replace the index URL below with the correct one
+# from the official PyTorch install matrix.
+
+--extra-index-url https://download.pytorch.org/whl/cu124
+--extra-index-url https://pypi.org/simple
+
+torch
+torchaudio
+torchvision
+torchcodec
+pyannote.audio
+huggingface_hub

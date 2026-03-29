@@ -1,0 +1,21 @@
+# Speaker attribution extras — CPU-only
+#
+# Usage:
+#   pip install -r requirements.txt -r requirements-speaker-cpu.txt
+#
+# This file is for:
+# - CPU-only VMs
+# - smoke tests / short-sample acceptance
+# - environments without CUDA
+#
+# It intentionally installs CPU wheels for the PyTorch stack.
+
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
+torch
+torchaudio
+torchvision
+torchcodec
+pyannote.audio
+huggingface_hub

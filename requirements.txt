@@ -1,3 +1,20 @@
+# Base runtime dependencies for youtube-transcripter
+#
+# Default install:
+#   pip install -r requirements.txt
+#
+# Speaker attribution extras:
+#   CPU-only environment:
+#     pip install -r requirements.txt -r requirements-speaker-cpu.txt
+#
+#   GPU environment:
+#     pip install -r requirements.txt -r requirements-speaker-gpu.txt
+#
+# Notes:
+# - `requirements.txt` stays lightweight and does NOT force pyannote/torch.
+# - Use the speaker-specific requirements file only when you want `pyannote_v1`.
+# - GPU requirements may need adjustment to match the machine's CUDA runtime.
+
 yt-dlp>=2024.1.0
 openai>=1.0.0
 python-dotenv>=1.0.0
