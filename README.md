@@ -13,7 +13,7 @@ A powerful YouTube video transcription tool that integrates OpenAI Whisper API f
 - **Dual Interface** - Both CLI and Web interface available
 - **Docker Deployment** - One-click deployment with Docker Compose
 - **Long-video Pipeline** - Chunking, merge/dedupe, and long-video transcript processing support
-- **Speaker Attribution** - Experimental generic-label speaker attribution (Speaker A/B/C) using pause heuristics; not named-speaker diarization
+- **Speaker Attribution** - Generic speaker labels (Speaker A/B/…): default **pause heuristic**, or optional **pyannote** post-hoc diarization (`pyannote_v1`); not named-speaker recognition
 - **Acquisition Hardening** - Structured acquisition diagnostics, fallback policy, and backup-service delegation foundation
 
 ## Architecture
@@ -59,6 +59,45 @@ docker compose up -d
 
 Open browser at http://localhost:3000
 
+The default backend image installs **only** `requirements.txt` (Whisper API path, no PyTorch/pyannote). For **pyannote** diarization, use a **local CLI** install with the speaker extras (see [Speaker attribution](#speaker-attribution)) or extend the Dockerfile yourself.
+
+## Speaker attribution
+
+Assigns **generic** labels (Speaker A/B/…), not real names.
+
+| Strategy | CLI `--speaker-strategy` | Extra Python deps | Notes |
+|----------|------------------------|-------------------|--------|
+| Pause-based heuristic (default) | `pause_heuristic_v1` | None beyond base `requirements.txt` | Fast; low accuracy |
+| **pyannote** diarization | `pyannote_v1` | PyTorch stack + `pyannote.audio` | Higher quality; requires HF token and **gated model access** |
+
+### Prerequisites (pyannote / `pyannote_v1`)
+
+1. **Python 3.11+** and **FFmpeg** on the host (FFmpeg is also used to normalize lossy audio before diarization).
+2. Install **one** of the speaker stacks (CPU or GPU — see `requirements-speaker-cpu.txt` / `requirements-speaker-gpu.txt`):
+   ```bash
+   pip install -r requirements.txt -r requirements-speaker-cpu.txt
+   ```
+   Adjust the GPU file’s PyTorch index if your CUDA version differs.
+3. **Hugging Face**
+   - Create a **read** token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
+   - Set `PYANNOTE_AUTH_TOKEN` in `.env` (see `.env.example`).
+   - For each **gated** model the pipeline needs, open the model page and click **Agree and access** (at minimum: `pyannote/speaker-diarization-3.1` and dependencies such as `pyannote/speaker-diarization-community-1`). Access can take a few minutes to propagate.
+
+### CLI examples
+
+```bash
+# List strategies and descriptions
+python main.py --list-speaker-strategies
+
+# Heuristic only (no pyannote)
+python main.py --speaker-attribution https://youtube.com/watch?v=VIDEO_ID
+
+# Real diarization (requires pyannote install + PYANNOTE_AUTH_TOKEN)
+python main.py --speaker-strategy pyannote_v1 "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Artifacts include `*_speaker_segments.json` and metadata when attribution is enabled.
+
 ## Usage
 
 ### CLI
@@ -72,8 +111,9 @@ pip install -r requirements.txt
 # Basic usage
 python main.py https://youtube.com/watch?v=VIDEO_ID
 
-# Enable speaker attribution (experimental, generic labels)
+# Speaker attribution (see "Speaker attribution" section above)
 python main.py --speaker-attribution https://youtube.com/watch?v=VIDEO_ID
+python main.py --speaker-strategy pyannote_v1 https://youtube.com/watch?v=VIDEO_ID
 
 # Interactive mode
 python main.py -i
@@ -99,9 +139,12 @@ python main.py --help
   - `docs/acquisition-runbook.md`
 - A/B backup-service deployment and acceptance guide:
   - `docs/backup-service-deployment.md`
-- Active OpenSpec changes:
-  - `openspec/changes/upgrade-transcription-pipeline/`
-  - `openspec/changes/harden-youtube-acquisition/`
+- Consolidated OpenSpec **specs** (after archiving completed changes):
+  - `openspec/specs/`
+- Remaining active OpenSpec **change** (if any):
+  - `openspec/changes/harden-youtube-acquisition/` (when still present)
+- Archived proposals:
+  - `openspec/changes/archive/`
 
 ## Tech Stack
 
@@ -125,11 +168,15 @@ python main.py --help
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `OPENAI_API_KEY` | OpenAI API key | Yes |
+| `PYANNOTE_AUTH_TOKEN` | Hugging Face token for `pyannote_v1` (gated models) | Only for pyannote strategy |
+| `HF_TOKEN` | Optional; some Hugging Face tooling also reads this | No |
 | `BACKUP_SERVICE_URL` | Backup-service base URL for A→B delegation | No |
 | `BACKUP_SERVICE_TOKEN` | Shared bearer token for backup-service delegation | No |
 | `SERVICE_ROLE` | Service role marker (e.g. `backup`); reflected in health output | No |
 | `YT_DLP_COOKIES_FILE` | Netscape-format cookies file for authenticated extraction | No |
 | `YT_DLP_COOKIES_FROM_BROWSER` | Browser name for cookie extraction | No |
+
+Copy `.env.example` to `.env` and edit; never commit real secrets.
 
 ## Backup Deployment
 
@@ -147,11 +194,7 @@ See `docs/backup-service-deployment.md` for the full A/B deployment and acceptan
 
 ## Current Project State
 
-This repo now contains two major implementation tracks:
-1. upgraded long-video transcript pipeline
-2. YouTube acquisition hardening + backup-service fallback MVP
-
-OpenSpec changes remain active until final reconciliation/archive.
+This repo includes: long-video transcript pipeline, speaker attribution (heuristic + optional pyannote), YouTube acquisition hardening, and backup-service fallback MVP. Completed OpenSpec changes are under `openspec/changes/archive/` with merged specs in `openspec/specs/`.
 
 ## Limitations
 

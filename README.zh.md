@@ -13,7 +13,7 @@
 - **雙介面** - 提供 CLI 與 Web 介面
 - **Docker 部署** - 可用 Docker Compose 快速部署
 - **長影片流程** - 支援 chunking、merge / dedupe 與長影片逐字稿流程
-- **說話者標註** - 實驗性通用標籤說話者標註 (Speaker A/B/C)，基於停頓偵測，非具名說話者辨識
+- **說話者標註** - 通用標籤（Speaker A/B/…）：預設**停頓啟發式**，可選 **pyannote** 事後分段（`pyannote_v1`）；非具名說話者辨識
 - **Acquisition Hardening** - 支援取得 YouTube 時的診斷、fallback policy 與 backup-service delegation 基礎能力
 
 ## 架構
@@ -59,6 +59,44 @@ docker compose up -d
 
 前往： http://localhost:3000
 
+預設 Docker 後端映像僅安裝 **`requirements.txt`**（走 Whisper API，不含 PyTorch／pyannote）。若要使用 **pyannote** 分段，請在本機用 CLI 安裝 speaker 額外套件（見下節「說話者標註」），或自行擴充 Dockerfile。
+
+## 說話者標註（多人／分段）
+
+標籤為 **Speaker A/B/…** 等通用標籤，非真人姓名。
+
+| 策略 | CLI `--speaker-strategy` | 額外 Python 依賴 | 說明 |
+|------|------------------------|------------------|------|
+| 停頓啟發式（預設） | `pause_heuristic_v1` | 僅基礎 `requirements.txt` | 快；準確度較低 |
+| **pyannote** 分段 | `pyannote_v1` | PyTorch 與 `pyannote.audio` 等 | 品質較佳；需 Hugging Face token 與**各 gated 模型授權** |
+
+### 使用 pyannote（`pyannote_v1`）的前置條件
+
+1. **Python 3.11+** 與系統已安裝 **FFmpeg**（亦用於分段前對 MP3 等音訊做正規化）。
+2. 擇一安裝 **CPU 或 GPU** 套件組（見 `requirements-speaker-cpu.txt`／`requirements-speaker-gpu.txt`）：
+   ```bash
+   pip install -r requirements.txt -r requirements-speaker-cpu.txt
+   ```
+   GPU 環境請依機器 CUDA 調整 GPU 檔內的 PyTorch index。
+3. **Hugging Face**
+   - 在 [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) 建立 **read** token。
+   - 在 `.env` 設定 `PYANNOTE_AUTH_TOKEN`（見 `.env.example`）。
+   - 對 pipeline 會用到的**每個** gated 模型頁面點選 **同意／存取**（至少包含 `pyannote/speaker-diarization-3.1` 及其相依，例如 `pyannote/speaker-diarization-community-1`）。同意後權限同步可能需要數分鐘。
+
+### CLI 範例
+
+```bash
+python main.py --list-speaker-strategies
+
+# 僅啟發式（不需 pyannote）
+python main.py --speaker-attribution https://youtube.com/watch?v=VIDEO_ID
+
+# 真實分段（需安裝 pyannote + PYANNOTE_AUTH_TOKEN）
+python main.py --speaker-strategy pyannote_v1 "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+啟用說話者標註時，輸出會包含 `*_speaker_segments.json` 與 metadata 內相關欄位。
+
 ## 使用方式
 
 ### CLI
@@ -72,8 +110,9 @@ pip install -r requirements.txt
 # 基本使用
 python main.py https://youtube.com/watch?v=VIDEO_ID
 
-# 啟用說話者標註（實驗性，通用標籤）
+# 說話者標註（詳見上方「說話者標註」）
 python main.py --speaker-attribution https://youtube.com/watch?v=VIDEO_ID
+python main.py --speaker-strategy pyannote_v1 https://youtube.com/watch?v=VIDEO_ID
 
 # 互動模式
 python main.py -i
@@ -99,20 +138,27 @@ python main.py --help
   - `docs/acquisition-runbook.md`
 - A/B backup-service 部署與驗收操作手冊：
   - `docs/backup-service-deployment.md`
-- Active OpenSpec changes：
-  - `openspec/changes/upgrade-transcription-pipeline/`
+- 已合併的 OpenSpec **主規格**：
+  - `openspec/specs/`
+- 若仍存在的進行中 OpenSpec **change**：
   - `openspec/changes/harden-youtube-acquisition/`
+- 已封存提案：
+  - `openspec/changes/archive/`
 
 ## 環境變數
 
 | 變數 | 說明 | 必填 |
 |------|------|------|
 | `OPENAI_API_KEY` | OpenAI API key | Yes |
+| `PYANNOTE_AUTH_TOKEN` | Hugging Face token（`pyannote_v1`、gated 模型） | 僅使用 pyannote 策略時 |
+| `HF_TOKEN` | 選填；部分 Hugging Face 工具亦會讀取 | No |
 | `BACKUP_SERVICE_URL` | A→B delegation 用的 backup-service URL | No |
 | `BACKUP_SERVICE_TOKEN` | A/B 共用的 bearer token | No |
 | `SERVICE_ROLE` | 服務角色標記（例如 `backup`） | No |
 | `YT_DLP_COOKIES_FILE` | Netscape 格式 cookies 檔案 | No |
 | `YT_DLP_COOKIES_FROM_BROWSER` | 從瀏覽器讀 cookies 的 browser 名稱 | No |
+
+請複製 `.env.example` 為 `.env` 後編輯；勿將真實金鑰提交至版本庫。
 
 ## Backup Deployment
 
@@ -134,11 +180,7 @@ docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d
 
 ## 目前專案狀態
 
-目前 repo 主要包含兩條主線：
-1. 升級後的長影片逐字稿 pipeline
-2. YouTube acquisition hardening + backup-service fallback MVP
-
-OpenSpec changes 目前仍保留在 active state，尚未 archive。
+目前包含：長影片逐字稿 pipeline、說話者標註（啟發式與可選 pyannote）、YouTube acquisition hardening、backup-service fallback MVP 等。已完成封存的 OpenSpec 變更見 `openspec/changes/archive/`，合併後主規格見 `openspec/specs/`。
 
 ## 限制
 
