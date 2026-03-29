@@ -6,6 +6,7 @@ backup service's GET /health endpoint.
 The health check confirms:
   1. The service is running and accepting requests.
   2. Whether required dependencies (OpenAI key, token) are configured.
+  3. Whether YouTube auth env is configured for auth-gated extraction.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ class BackupHealthStatus:
     service: str = "youtube-transcripter-backup"
     auth_configured: bool = False
     openai_configured: bool = False
+    yt_auth_configured: bool = False
+    yt_auth_mode: Optional[str] = None
     service_role: Optional[str] = None
     detail: Optional[str] = None
 
@@ -41,7 +44,10 @@ class BackupHealthStatus:
             "service": self.service,
             "auth_configured": self.auth_configured,
             "openai_configured": self.openai_configured,
+            "yt_auth_configured": self.yt_auth_configured,
         }
+        if self.yt_auth_mode is not None:
+            d["yt_auth_mode"] = self.yt_auth_mode
         if self.service_role is not None:
             d["service_role"] = self.service_role
         if self.detail is not None:
@@ -53,6 +59,15 @@ def check_backup_health() -> BackupHealthStatus:
     """Build a health status by inspecting the runtime environment."""
     token_ok = get_configured_token() is not None
     openai_ok = bool(os.environ.get("OPENAI_API_KEY", "").strip())
+
+    cookies_file = os.environ.get("YT_DLP_COOKIES_FILE", "").strip()
+    cookies_browser = os.environ.get("YT_DLP_COOKIES_FROM_BROWSER", "").strip()
+    yt_auth_mode = None
+    if cookies_file:
+        yt_auth_mode = "cookie_file"
+    elif cookies_browser:
+        yt_auth_mode = "cookie_browser"
+    yt_auth_ok = yt_auth_mode is not None
 
     healthy = token_ok and openai_ok
 
@@ -71,6 +86,8 @@ def check_backup_health() -> BackupHealthStatus:
         healthy=healthy,
         auth_configured=token_ok,
         openai_configured=openai_ok,
+        yt_auth_configured=yt_auth_ok,
+        yt_auth_mode=yt_auth_mode,
         service_role=service_role,
         detail=detail,
     )

@@ -18,8 +18,12 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import string
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from src.transcript.models import Segment, SpeakerInfo
@@ -187,6 +191,67 @@ class PauseHeuristicStrategy:
 
 logger = logging.getLogger(__name__)
 
+# Lossy / container formats often decode with a length mismatch vs. header duration;
+# pyannote.audio's strict crop then raises. Decoding via ffmpeg to PCM WAV avoids this.
+_PYANNOTE_PREP_EXTS = frozenset(
+    {".mp3", ".m4a", ".aac", ".opus", ".ogg", ".webm", ".mp4", ".mkv"}
+)
+
+
+def _prepare_audio_for_pyannote(audio_file: str) -> tuple[str, bool]:
+    """Return (path, is_temporary) for audio passed to the pyannote pipeline.
+
+    MP3/M4A etc. can yield slightly fewer samples than the duration math expects;
+    pyannote rejects that. Re-encode to 16 kHz mono WAV so decoded length matches.
+    """
+    path = Path(audio_file)
+    if path.suffix.lower() not in _PYANNOTE_PREP_EXTS:
+        return str(path), False
+
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError(
+            "pyannote 需要 ffmpeg：請先安裝 ffmpeg，以便將此音訊轉成 WAV "
+            "（避免 MP3/M4A 解碼長度與 pyannote 預期取樣數不一致）。"
+        )
+
+    fd, out_path = tempfile.mkstemp(suffix=".wav", prefix="pyannote_prep_")
+    os.close(fd)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(path.resolve()),
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-c:a",
+        "pcm_s16le",
+        out_path,
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+        err = (exc.stderr or "").strip() or str(exc)
+        raise RuntimeError(f"ffmpeg 轉檔失敗（pyannote 預處理）: {err}") from exc
+
+    logger.debug("pyannote: using ffmpeg-prepared WAV: %s", out_path)
+    return out_path, True
+
+
+def _pyannote_annotation(diarization: object) -> object:
+    """Newer pyannote returns ``DiarizeOutput`` with ``speaker_diarization``; older API returns ``Annotation``."""
+    ann = getattr(diarization, "speaker_diarization", None)
+    return ann if ann is not None else diarization
+
+
 PYANNOTE_STRATEGY_ID = "pyannote_v1"
 _PYANNOTE_MODEL = "pyannote/speaker-diarization-3.1"
 
@@ -200,8 +265,10 @@ class PyannoteStrategy:
 
     Requires:
         - ``pyannote.audio`` installed (optional dependency).
-        - A Hugging Face auth token with access to the pyannote model,
-          passed via ``auth_token`` or the ``PYANNOTE_AUTH_TOKEN`` env var.
+        - A Hugging Face token (``PYANNOTE_AUTH_TOKEN`` or ``auth_token``) whose
+          account has **accepted the license** on the Hub for the pipeline model
+          *and* every gated dependency (e.g.
+          ``pyannote/speaker-diarization-community-1`` used for PLDA weights).
     """
 
     def __init__(self, *, auth_token: str | None = None) -> None:
@@ -234,10 +301,26 @@ class PyannoteStrategy:
             )
 
         logger.info("Loading pyannote pipeline %s …", _PYANNOTE_MODEL)
-        self._pipeline = Pipeline.from_pretrained(
-            _PYANNOTE_MODEL,
-            use_auth_token=self._auth_token,
-        )
+        try:
+            self._pipeline = Pipeline.from_pretrained(
+                _PYANNOTE_MODEL,
+                token=self._auth_token,
+            )
+        except Exception as exc:
+            err = str(exc).lower()
+            if (
+                exc.__class__.__name__ == "GatedRepoError"
+                or "not in the authorized list" in err
+                or ("403" in err and "gated" in err)
+            ):
+                raise RuntimeError(
+                    "Hugging Face 回傳 403：某個 pyannote 相依模型為 gated，你的帳號尚未同意條款。"
+                    "請用瀏覽器登入與 token 相同的帳號，在模型頁面點「Agree and access repository」："
+                    "至少包含主模型與 speaker-diarization-3.1 拉取的子相依（常見為 "
+                    "https://huggingface.co/pyannote/speaker-diarization-community-1 ）。"
+                    "同意後稍等幾分鐘再重試。"
+                ) from exc
+            raise
         return self._pipeline
 
     # -- core attribution ----------------------------------------------------
@@ -264,12 +347,21 @@ class PyannoteStrategy:
             )
 
         pipeline = self._get_pipeline()
-        diarization = pipeline(audio_file)  # type: ignore[operator]
+        prep_path, prep_is_temp = _prepare_audio_for_pyannote(audio_file)
+        try:
+            diarization = pipeline(prep_path)  # type: ignore[operator]
+        finally:
+            if prep_is_temp:
+                try:
+                    os.unlink(prep_path)
+                except OSError:
+                    pass
 
         # Collect speaker turns: [(start, end, label), ...]
+        annotation = _pyannote_annotation(diarization)
         speaker_turns: list[tuple[float, float, str]] = [
             (turn.start, turn.end, speaker_label)
-            for turn, _, speaker_label in diarization.itertracks(yield_label=True)
+            for turn, _, speaker_label in annotation.itertracks(yield_label=True)
         ]
 
         # Deterministic label mapping: pyannote's SPEAKER_00 → Speaker A, etc.
@@ -406,8 +498,9 @@ _STRATEGY_DESCRIPTIONS: dict[str, str] = {
     ),
     PYANNOTE_STRATEGY_ID: (
         "Real diarization via pyannote.audio (model: pyannote/speaker-diarization-3.1). "
-        "Requires: pip install pyannote.audio + PYANNOTE_AUTH_TOKEN env var "
-        "(Hugging Face token with model access). "
+        "Requires: pip install pyannote.audio + PYANNOTE_AUTH_TOKEN; on Hugging Face you must "
+        "accept licenses for this pipeline and gated deps (e.g. "
+        "pyannote/speaker-diarization-community-1). "
         "Accuracy: high for 2-3 speaker interviews/podcasts. Slower than heuristic."
     ),
 }
