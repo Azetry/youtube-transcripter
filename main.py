@@ -62,6 +62,7 @@ def save_transcript(
     original_text: str,
     corrected_text: str,
     output_dir: str = "./transcripts",
+    artifacts: "TranscriptArtifacts | None" = None,
 ) -> dict[str, str]:
     """儲存逐字稿到檔案"""
     os.makedirs(output_dir, exist_ok=True)
@@ -88,21 +89,42 @@ def save_transcript(
         "upload_date": video_info.upload_date,
         "processed_at": datetime.now().isoformat(),
     }
+
+    # Include speaker attribution metadata when available
+    if artifacts and artifacts.speaker_attribution_enabled:
+        metadata["speaker_attribution"] = {
+            "enabled": True,
+            "strategy": artifacts.speaker_strategy,
+            "detected_speaker_count": artifacts.speaker_count,
+            "speaker_segments_file": os.path.join(
+                output_dir, f"{base_name}_speaker_segments.json"
+            ) if artifacts.speaker_segments else None,
+        }
+
     with open(metadata_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+    saved = {
+        "original": original_path,
+        "corrected": corrected_path,
+        "metadata": metadata_path,
+    }
+
+    # Save speaker segments as separate JSON when present
+    if artifacts and artifacts.speaker_attribution_enabled and artifacts.speaker_segments:
+        segments_path = os.path.join(output_dir, f"{base_name}_speaker_segments.json")
+        with open(segments_path, 'w', encoding='utf-8') as f:
+            json.dump(artifacts.speaker_segments, f, ensure_ascii=False, indent=2)
+        saved["speaker_segments"] = segments_path
 
     # 儲存 HTML 差異報告
     diff_viewer = DiffViewer()
     diff_result = diff_viewer.compare(original_text, corrected_text)
     diff_path = os.path.join(output_dir, f"{base_name}_diff.html")
     diff_viewer.save_html_diff(diff_result, diff_path)
+    saved["diff_html"] = diff_path
 
-    return {
-        "original": original_path,
-        "corrected": corrected_path,
-        "metadata": metadata_path,
-        "diff_html": diff_path,
-    }
+    return saved
 
 
 def process_video(
@@ -169,14 +191,35 @@ def process_video(
         artifacts.original_text,
         artifacts.corrected_text,
         output_dir=output_dir,
+        artifacts=artifacts,
     )
 
+    # 6. Speaker attribution summary
+    if artifacts.speaker_attribution_enabled:
+        speaker_lines = (
+            f"Strategy: {artifacts.speaker_strategy}\n"
+            f"Detected speakers: {artifacts.speaker_count}"
+        )
+        if saved_files.get("speaker_segments"):
+            speaker_lines += f"\nSegments file: {saved_files['speaker_segments']}"
+        console.print()
+        console.print(Panel(
+            speaker_lines,
+            title="Speaker Attribution",
+            border_style="magenta",
+        ))
+
     console.print()
-    console.print(Panel(
+    file_lines = (
         f"原始轉譯: {saved_files['original']}\n"
         f"校正後: {saved_files['corrected']}\n"
         f"差異報告: {saved_files['diff_html']}\n"
-        f"元資料: {saved_files['metadata']}",
+        f"元資料: {saved_files['metadata']}"
+    )
+    if saved_files.get("speaker_segments"):
+        file_lines += f"\n說話者分段: {saved_files['speaker_segments']}"
+    console.print(Panel(
+        file_lines,
         title="已儲存檔案",
         border_style="green",
     ))

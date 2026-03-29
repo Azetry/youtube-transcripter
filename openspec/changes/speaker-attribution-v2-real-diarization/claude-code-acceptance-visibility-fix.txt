@@ -1,0 +1,37 @@
+Implement a small acceptance-visibility follow-up for speaker attribution in repo `youtube-transcripter`.
+
+Repo:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+
+Linked local spec id:
+openspec-local-speaker-attribution-v2-real-diarization-20260328
+
+Context:
+- Speaker attribution v2 implementation units are complete.
+- Real CLI acceptance exposed a gap: saved metadata/output does not clearly surface speaker attribution results.
+- The operator can enable strategy flags, but the resulting saved artifacts do not clearly show whether attribution was applied or what strategy produced the output.
+
+Goal:
+Make speaker attribution results explicitly visible in CLI-facing saved artifacts and summary output so acceptance is operator-verifiable.
+
+In scope:
+1. Ensure saved metadata/artifact output includes speaker attribution fields when enabled
+2. Surface at least:
+   - speaker_attribution_enabled
+   - speaker_strategy
+   - speaker_count / detected_speaker_count
+   - speaker_segments or a clear pointer/path to them
+3. Improve CLI completion output so operators can see that speaker attribution ran and which strategy was used
+4. Add/update focused tests
+5. Run validation/tests
+
+Constraints:
+- Keep this follow-up small and acceptance-focused
+- Do NOT redesign the whole artifact model again
+- Do NOT add named speaker inference
+- Do NOT touch unrelated backup/deployment code
+
+Expected deliverable:
+- speaker attribution is clearly visible in saved output/metadata and CLI summary
+- acceptance via CLI is operator-verifiable
+- validation/tests pass

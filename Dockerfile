@@ -15,6 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 複製應用程式碼
+COPY main.py ./
 COPY src/ ./src/
 COPY api/ ./api/
 COPY tests/ ./tests/
