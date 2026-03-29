@@ -35,3 +35,9 @@ Thumbs.db
 
 # Claude
 .claude/
+
+# Local dev / scratch (not part of the shipped app)
+.python-version
+run_transcribe.sh
+smoke_test.py
+test_cli_flag.py

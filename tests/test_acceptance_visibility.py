@@ -4,8 +4,6 @@ import json
 import os
 import tempfile
 
-import pytest
-
 from src.models.transcript import TranscriptArtifacts
 from src.youtube_extractor import VideoInfo
 
@@ -141,52 +139,45 @@ class TestSpeakerSegmentsFile:
             assert "speaker_segments" not in saved
 
 
-class TestCliSummaryOutput:
-    """CLI completion output surfaces speaker attribution info."""
+class TestSpeakerAttributionSummaryFormat:
+    """format_speaker_attribution_summary matches process_video panel body."""
 
-    def test_speaker_panel_printed_when_enabled(self, capsys):
-        """Verify the Rich console prints speaker attribution panel."""
-        from unittest.mock import MagicMock, patch
-        from io import StringIO
-
-        from rich.console import Console
-
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False, width=120)
+    def test_includes_strategy_count_and_segments_path(self):
+        from main import format_speaker_attribution_summary
 
         artifacts = _make_artifacts(
-            speaker_enabled=True, strategy="pause_heuristic_v1",
-            count=2, segments=_SPEAKER_SEGMENTS,
+            speaker_enabled=True,
+            strategy="pause_heuristic_v1",
+            count=2,
+            segments=_SPEAKER_SEGMENTS,
         )
-
-        # Simulate the speaker attribution summary output block from process_video
-        saved_files = {"speaker_segments": "/tmp/fake_segments.json"}
-        speaker_lines = (
-            f"Strategy: {artifacts.speaker_strategy}\n"
-            f"Detected speakers: {artifacts.speaker_count}"
+        text = format_speaker_attribution_summary(
+            artifacts,
+            {"speaker_segments": "/tmp/fake_segments.json"},
         )
-        if saved_files.get("speaker_segments"):
-            speaker_lines += f"\nSegments file: {saved_files['speaker_segments']}"
+        assert text is not None
+        assert "Strategy: pause_heuristic_v1" in text
+        assert "Detected speakers: 2" in text
+        assert "Segments file: /tmp/fake_segments.json" in text
 
-        from rich.panel import Panel
-        test_console.print(Panel(
-            speaker_lines,
-            title="Speaker Attribution",
-            border_style="magenta",
-        ))
+    def test_omits_segments_line_when_not_in_saved_files(self):
+        from main import format_speaker_attribution_summary
 
-        output = buf.getvalue()
-        assert "Speaker Attribution" in output
-        assert "pause_heuristic_v1" in output
-        assert "Detected speakers: 2" in output
+        artifacts = _make_artifacts(
+            speaker_enabled=True,
+            strategy="pause_heuristic_v1",
+            count=2,
+            segments=_SPEAKER_SEGMENTS,
+        )
+        text = format_speaker_attribution_summary(artifacts, {})
+        assert text is not None
+        assert "Segments file:" not in text
 
-    def test_no_speaker_panel_when_disabled(self):
-        """When speaker attribution is off, no speaker panel should appear."""
+    def test_returns_none_when_disabled(self):
+        from main import format_speaker_attribution_summary
+
         artifacts = _make_artifacts(speaker_enabled=False)
-        # The condition in process_video is:
-        #   if artifacts.speaker_attribution_enabled:
-        # So nothing should be printed. Just verify the flag.
-        assert not artifacts.speaker_attribution_enabled
+        assert format_speaker_attribution_summary(artifacts, {}) is None
 
 
 class TestMetadataSegmentsFileConsistency:

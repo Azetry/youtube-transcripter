@@ -1,7 +1,4 @@
-Implement a small acceptance-visibility follow-up for speaker attribution in repo `youtube-transcripter`.
-
-Repo:
-/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+Implement a small acceptance-visibility follow-up for speaker attribution in repo `youtube-transcripter` (repository root).
 
 Linked local spec id:
 openspec-local-speaker-attribution-v2-real-diarization-20260328

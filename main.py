@@ -62,9 +62,13 @@ def save_transcript(
     original_text: str,
     corrected_text: str,
     output_dir: str = "./transcripts",
-    artifacts: "TranscriptArtifacts | None" = None,
+    artifacts: TranscriptArtifacts | None = None,
 ) -> dict[str, str]:
-    """儲存逐字稿到檔案"""
+    """儲存逐字稿到檔案。
+
+    回傳路徑字典，鍵至少包含：original、corrected、metadata、diff_html；
+    若有說話人分段檔則另含 speaker_segments。
+    """
     os.makedirs(output_dir, exist_ok=True)
 
     base_name = f"{video_info.video_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -125,6 +129,23 @@ def save_transcript(
     saved["diff_html"] = diff_path
 
     return saved
+
+
+def format_speaker_attribution_summary(
+    artifacts: TranscriptArtifacts,
+    saved_files: dict[str, str],
+) -> str | None:
+    """組出「Speaker Attribution」面板的內文；未啟用說話人時回傳 None。"""
+    if not artifacts.speaker_attribution_enabled:
+        return None
+    lines = [
+        f"Strategy: {artifacts.speaker_strategy}",
+        f"Detected speakers: {artifacts.speaker_count}",
+    ]
+    seg_path = saved_files.get("speaker_segments")
+    if seg_path:
+        lines.append(f"Segments file: {seg_path}")
+    return "\n".join(lines)
 
 
 def process_video(
@@ -195,16 +216,11 @@ def process_video(
     )
 
     # 6. Speaker attribution summary
-    if artifacts.speaker_attribution_enabled:
-        speaker_lines = (
-            f"Strategy: {artifacts.speaker_strategy}\n"
-            f"Detected speakers: {artifacts.speaker_count}"
-        )
-        if saved_files.get("speaker_segments"):
-            speaker_lines += f"\nSegments file: {saved_files['speaker_segments']}"
+    speaker_summary = format_speaker_attribution_summary(artifacts, saved_files)
+    if speaker_summary is not None:
         console.print()
         console.print(Panel(
-            speaker_lines,
+            speaker_summary,
             title="Speaker Attribution",
             border_style="magenta",
         ))
