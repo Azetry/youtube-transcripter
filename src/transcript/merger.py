@@ -400,13 +400,20 @@ def mark_chunk_boundary_uncertainty(
     segments: list[Segment],
     chunk_count: int,
 ) -> list[Segment]:
-    """Mark the first segment of each non-first chunk as speaker-unknown.
+    """Mark boundary segments at chunk edges as speaker-unknown.
 
     When merging speaker-aware chunks, we cannot guarantee that the
-    speaker identity is consistent across chunk boundaries.  This
-    function replaces the speaker attribution_mode with "unknown" for
-    the first segment of each chunk after the first, preserving the
-    original label but signaling uncertainty.
+    speaker identity is consistent across chunk boundaries.  Diarization
+    quality also degrades near chunk edges.
+
+    This function marks as ``"unknown"``:
+      * The **first** segment of each non-first chunk (cross-chunk
+        continuity is not guaranteed).
+      * The **last** segment of each non-last chunk (diarization may be
+        truncated or degraded at the trailing edge).
+
+    Original speaker labels are preserved for reviewability, but
+    confidence is downgraded and mode set to ``"unknown"``.
 
     Only affects segments that already have speaker metadata.
     Returns a new list; does not mutate the input.
@@ -414,19 +421,34 @@ def mark_chunk_boundary_uncertainty(
     if chunk_count <= 1 or not segments:
         return segments
 
-    result: list[Segment] = []
-    seen_chunks: set[int] = set()
+    # Pre-compute which segment indices need boundary marking.
+    # We need: first segment of each non-first chunk, last segment of each non-last chunk.
+    first_of_chunk: dict[int, int] = {}   # chunk_index → segment index (first)
+    last_of_chunk: dict[int, int] = {}    # chunk_index → segment index (last)
 
-    for seg in segments:
+    for idx, seg in enumerate(segments):
         ci = seg.chunk_index
-        if (
-            ci is not None
-            and ci > 0
-            and ci not in seen_chunks
-            and seg.speaker is not None
-        ):
-            # First segment of a non-first chunk: mark as unknown
-            seen_chunks.add(ci)
+        if ci is None:
+            continue
+        if ci not in first_of_chunk:
+            first_of_chunk[ci] = idx
+        last_of_chunk[ci] = idx
+
+    # Segment indices that should be marked uncertain
+    mark_indices: set[int] = set()
+    max_chunk = max(first_of_chunk) if first_of_chunk else 0
+
+    for ci in first_of_chunk:
+        # First segment of non-first chunks
+        if ci > 0:
+            mark_indices.add(first_of_chunk[ci])
+        # Last segment of non-last chunks
+        if ci < max_chunk:
+            mark_indices.add(last_of_chunk[ci])
+
+    result: list[Segment] = []
+    for idx, seg in enumerate(segments):
+        if idx in mark_indices and seg.speaker is not None:
             uncertain_speaker = SpeakerInfo(
                 label=seg.speaker.label,
                 confidence=0.1,
@@ -440,8 +462,6 @@ def mark_chunk_boundary_uncertainty(
                 chunk_index=seg.chunk_index,
             ))
         else:
-            if ci is not None:
-                seen_chunks.add(ci)
             result.append(seg)
 
     return result

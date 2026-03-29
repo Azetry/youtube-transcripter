@@ -18,6 +18,8 @@ import pytest
 
 from src.transcript.models import Segment, SpeakerInfo, ChunkTranscript
 from src.transcript.speaker_attribution import (
+    AMBIGUITY_MARGIN,
+    MIN_OVERLAP_RATIO,
     PYANNOTE_STRATEGY_ID,
     STRATEGY_ID,
     AttributionResult,
@@ -201,30 +203,39 @@ class TestChunkBoundaryUncertainty:
         result = mark_chunk_boundary_uncertainty(segs, chunk_count=1)
         assert result[0].speaker.attribution_mode == "predicted"
 
-    def test_first_chunk_unchanged(self):
+    def test_two_chunks_boundary_segments_marked(self):
+        """With two chunks, last seg of chunk 0 and first seg of chunk 1 are marked."""
         speaker = SpeakerInfo("Speaker A", 0.4, "predicted")
         segs = [
             Segment(0, 5, "chunk 0 seg", speaker, chunk_index=0),
             Segment(600, 605, "chunk 1 seg", speaker, chunk_index=1),
         ]
         result = mark_chunk_boundary_uncertainty(segs, chunk_count=2)
-        # First chunk's segment unchanged
-        assert result[0].speaker.attribution_mode == "predicted"
-        # Second chunk's first segment marked unknown
+        # Last (only) segment of chunk 0 marked unknown (trailing edge)
+        assert result[0].speaker.attribution_mode == "unknown"
+        assert result[0].speaker.confidence == 0.1
+        # First segment of chunk 1 marked unknown (leading edge)
         assert result[1].speaker.attribution_mode == "unknown"
         assert result[1].speaker.confidence == 0.1
 
-    def test_second_segment_of_second_chunk_unchanged(self):
+    def test_interior_segments_unchanged(self):
+        """Interior segments (not at chunk edges) stay unchanged."""
         speaker = SpeakerInfo("Speaker B", 0.4, "predicted")
         segs = [
-            Segment(0, 5, "chunk 0", SpeakerInfo("Speaker A", 0.4, "predicted"), chunk_index=0),
+            Segment(0, 5, "chunk 0 first", SpeakerInfo("Speaker A", 0.4, "predicted"), chunk_index=0),
+            Segment(5, 10, "chunk 0 last", SpeakerInfo("Speaker A", 0.4, "predicted"), chunk_index=0),
             Segment(600, 605, "chunk 1 first", speaker, chunk_index=1),
             Segment(605, 610, "chunk 1 second", speaker, chunk_index=1),
         ]
         result = mark_chunk_boundary_uncertainty(segs, chunk_count=2)
-        # Only first segment of chunk 1 is unknown
+        # First seg of chunk 0: unchanged (first chunk leading edge not marked)
+        assert result[0].speaker.attribution_mode == "predicted"
+        # Last seg of chunk 0: marked unknown (trailing edge)
         assert result[1].speaker.attribution_mode == "unknown"
-        assert result[2].speaker.attribution_mode == "predicted"
+        # First seg of chunk 1: marked unknown (leading edge)
+        assert result[2].speaker.attribution_mode == "unknown"
+        # Second seg of chunk 1: unchanged (interior of last chunk)
+        assert result[3].speaker.attribution_mode == "predicted"
 
     def test_no_speaker_metadata_skipped(self):
         """Segments without speaker info are not modified."""
@@ -235,6 +246,39 @@ class TestChunkBoundaryUncertainty:
         result = mark_chunk_boundary_uncertainty(segs, chunk_count=2)
         assert result[0].speaker is None
         assert result[1].speaker is None
+
+    def test_three_chunks_middle_both_edges_marked(self):
+        """For a middle chunk, both first and last segments are marked."""
+        speaker = SpeakerInfo("Speaker A", 0.8, "confident")
+        segs = [
+            Segment(0, 5, "c0 only", speaker, chunk_index=0),
+            Segment(600, 605, "c1 first", speaker, chunk_index=1),
+            Segment(605, 610, "c1 middle", speaker, chunk_index=1),
+            Segment(610, 615, "c1 last", speaker, chunk_index=1),
+            Segment(1200, 1205, "c2 only", speaker, chunk_index=2),
+        ]
+        result = mark_chunk_boundary_uncertainty(segs, chunk_count=3)
+        # c0 last (=only): trailing edge → unknown
+        assert result[0].speaker.attribution_mode == "unknown"
+        # c1 first: leading edge → unknown
+        assert result[1].speaker.attribution_mode == "unknown"
+        # c1 middle: interior → unchanged
+        assert result[2].speaker.attribution_mode == "confident"
+        # c1 last: trailing edge → unknown
+        assert result[3].speaker.attribution_mode == "unknown"
+        # c2 first (=only): leading edge → unknown
+        assert result[4].speaker.attribution_mode == "unknown"
+
+    def test_boundary_preserves_label(self):
+        """Marking preserves original speaker label for reviewability."""
+        speaker = SpeakerInfo("Speaker B", 0.9, "confident")
+        segs = [
+            Segment(0, 5, "c0", speaker, chunk_index=0),
+            Segment(600, 605, "c1", speaker, chunk_index=1),
+        ]
+        result = mark_chunk_boundary_uncertainty(segs, chunk_count=2)
+        assert result[0].speaker.label == "Speaker B"
+        assert result[1].speaker.label == "Speaker B"
 
 
 # ── Backward compatibility tests ───────────────────────────────────
@@ -334,7 +378,11 @@ class TestSpeakerAwareMerge:
 
         # Mark chunk boundaries
         marked = mark_chunk_boundary_uncertainty(merged.segments, 2)
-        # Find first segment from chunk 1
+        # Last segment of chunk 0 should be marked unknown (trailing edge)
+        chunk0_segs_in_merged = [s for s in marked if s.chunk_index == 0]
+        if chunk0_segs_in_merged:
+            assert chunk0_segs_in_merged[-1].speaker.attribution_mode == "unknown"
+        # First segment of chunk 1 should be marked unknown (leading edge)
         chunk1_segs_in_merged = [s for s in marked if s.chunk_index == 1]
         if chunk1_segs_in_merged:
             assert chunk1_segs_in_merged[0].speaker.attribution_mode == "unknown"
@@ -448,14 +496,79 @@ class TestAlignSegmentsToTurns:
         assert labels == ["Speaker A", "Speaker B", "Speaker A"]
 
     def test_low_overlap_ratio_marks_predicted(self):
-        """When overlap ratio <= 0.5, mode should be 'predicted'."""
-        # Segment is 10s, but only 3s overlap with the turn
+        """When overlap ratio <= 0.5 (but >= MIN_OVERLAP_RATIO), mode should be 'predicted'."""
+        # Segment is 10s, but only 3s overlap with the turn = 0.3 ratio
         segs = _make_segments([(0.0, 10.0, "partially covered")])
         turns = [(7.0, 10.0, "SPEAKER_00")]  # only 3s overlap out of 10s = 0.3
         label_map = {"SPEAKER_00": "Speaker A"}
         result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
         assert result[0].speaker.attribution_mode == "predicted"
         assert result[0].speaker.confidence < 0.9
+
+    def test_very_low_overlap_marks_unknown(self):
+        """When overlap ratio < MIN_OVERLAP_RATIO, mode should be 'unknown'."""
+        # Segment is 20s, but only 2s overlap = 0.1 ratio (below 0.15 threshold)
+        segs = _make_segments([(0.0, 20.0, "barely covered")])
+        turns = [(18.0, 20.0, "SPEAKER_00")]  # 2s overlap out of 20s = 0.1
+        label_map = {"SPEAKER_00": "Speaker A"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        assert result[0].speaker.attribution_mode == "unknown"
+        assert result[0].speaker.label == "Speaker ?"
+        assert result[0].speaker.confidence == 0.1
+
+    def test_overlap_at_threshold_boundary(self):
+        """Overlap ratio exactly at MIN_OVERLAP_RATIO is still assigned."""
+        # Segment 20s, overlap 3s = 0.15 ratio (exactly at threshold)
+        segs = _make_segments([(0.0, 20.0, "at threshold")])
+        turns = [(17.0, 20.0, "SPEAKER_00")]
+        label_map = {"SPEAKER_00": "Speaker A"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        assert result[0].speaker.label == "Speaker A"
+        assert result[0].speaker.attribution_mode == "predicted"
+
+    def test_ambiguous_two_turns_near_equal_overlap(self):
+        """When top-two turns have near-equal overlap, assignment is downgraded."""
+        # Segment 10s crossing a turn boundary exactly in the middle
+        segs = _make_segments([(5.0, 15.0, "crosses boundary evenly")])
+        turns = [
+            (0.0, 10.0, "SPEAKER_00"),   # overlap: 10-5 = 5s
+            (10.0, 20.0, "SPEAKER_01"),   # overlap: 15-10 = 5s
+        ]
+        label_map = {"SPEAKER_00": "Speaker A", "SPEAKER_01": "Speaker B"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        # Both overlaps are equal → ambiguous → forced to "predicted"
+        assert result[0].speaker.attribution_mode == "predicted"
+        # Confidence should be capped
+        assert result[0].speaker.confidence <= 0.65
+
+    def test_ambiguous_near_equal_still_picks_best(self):
+        """Ambiguous assignment still uses the turn with slightly more overlap."""
+        # Segment 10s: 4.5s with A, 5.5s with B → difference/best = 1/5.5 ≈ 0.18 < 0.20
+        segs = _make_segments([(5.0, 15.0, "slightly biased")])
+        turns = [
+            (0.0, 9.5, "SPEAKER_00"),    # overlap: 9.5-5 = 4.5s
+            (9.5, 20.0, "SPEAKER_01"),    # overlap: 15-9.5 = 5.5s
+        ]
+        label_map = {"SPEAKER_00": "Speaker A", "SPEAKER_01": "Speaker B"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        # Picks Speaker B (more overlap) but still ambiguous
+        assert result[0].speaker.label == "Speaker B"
+        assert result[0].speaker.attribution_mode == "predicted"
+        assert result[0].speaker.confidence <= 0.65
+
+    def test_not_ambiguous_clear_winner(self):
+        """When one turn clearly dominates, assignment is not ambiguous."""
+        # Segment 10s: 8s with A, 2s with B → difference/best = 6/8 = 0.75 >> 0.20
+        segs = _make_segments([(0.0, 10.0, "clear winner")])
+        turns = [
+            (0.0, 8.0, "SPEAKER_00"),    # overlap: 8s
+            (8.0, 12.0, "SPEAKER_01"),   # overlap: 2s
+        ]
+        label_map = {"SPEAKER_00": "Speaker A", "SPEAKER_01": "Speaker B"}
+        result = _align_segments_to_turns(segs, turns, label_map, chunk_index=None)
+        assert result[0].speaker.label == "Speaker A"
+        assert result[0].speaker.attribution_mode == "confident"  # 8/10 = 0.8 > 0.5
+        assert result[0].speaker.confidence > 0.65
 
 
 # ── Pyannote strategy tests (mocked) ─────────────────────────────

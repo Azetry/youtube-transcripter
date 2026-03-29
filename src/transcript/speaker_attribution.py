@@ -293,6 +293,14 @@ class PyannoteStrategy:
         )
 
 
+# Alignment policy constants
+# Overlap ratio below this is treated as "unknown" — too weak to trust.
+MIN_OVERLAP_RATIO = 0.15
+# When the top-two overlapping turns are within this relative margin of each
+# other, the assignment is ambiguous and confidence is capped at "predicted".
+AMBIGUITY_MARGIN = 0.20
+
+
 def _align_segments_to_turns(
     segments: list[Segment],
     speaker_turns: list[tuple[float, float, str]],
@@ -302,30 +310,58 @@ def _align_segments_to_turns(
     """Align transcript segments to diarization speaker turns by overlap.
 
     For each segment, the speaker turn with the largest temporal overlap
-    is selected.  When no turn overlaps, the segment is marked
-    ``attribution_mode="unknown"`` with low confidence.
+    is selected.  Conservative policy:
+
+    * **No overlap** → ``"unknown"`` with confidence 0.1.
+    * **Overlap ratio < MIN_OVERLAP_RATIO** → ``"unknown"`` — the overlap
+      is too small to be meaningful.
+    * **Two turns with near-equal overlap** (within ``AMBIGUITY_MARGIN``)
+      → confidence capped and mode forced to ``"predicted"`` even if the
+      best overlap ratio exceeds 0.5.
+    * Otherwise → ``"confident"`` (ratio > 0.5) or ``"predicted"``.
     """
     attributed: list[Segment] = []
 
     for seg in segments:
         best_speaker: str | None = None
         best_overlap = 0.0
+        second_best_overlap = 0.0
 
         for turn_start, turn_end, speaker_label in speaker_turns:
             overlap = min(seg.end, turn_end) - max(seg.start, turn_start)
             if overlap > best_overlap:
+                second_best_overlap = best_overlap
                 best_overlap = overlap
                 best_speaker = speaker_label
+            elif overlap > second_best_overlap:
+                second_best_overlap = overlap
 
         seg_duration = seg.end - seg.start
+        overlap_ratio = (
+            best_overlap / seg_duration
+            if best_speaker is not None and best_overlap > 0 and seg_duration > 0
+            else 0.0
+        )
 
-        if best_speaker is not None and best_overlap > 0:
-            overlap_ratio = (
-                best_overlap / seg_duration if seg_duration > 0 else 0.0
+        if best_speaker is not None and best_overlap > 0 and overlap_ratio >= MIN_OVERLAP_RATIO:
+            # Detect multi-turn ambiguity: top-two overlaps are close
+            ambiguous = (
+                second_best_overlap > 0
+                and best_overlap > 0
+                and (best_overlap - second_best_overlap) / best_overlap <= AMBIGUITY_MARGIN
             )
+
             # Scale confidence: 0.6 base + up to 0.35 from overlap ratio
             confidence = round(min(0.95, 0.6 + 0.35 * overlap_ratio), 2)
-            mode = "confident" if overlap_ratio > 0.5 else "predicted"
+
+            if ambiguous:
+                # Cap confidence and force "predicted" — we can't reliably
+                # choose between two nearly-equal turns.
+                confidence = round(min(confidence, 0.65), 2)
+                mode = "predicted"
+            else:
+                mode = "confident" if overlap_ratio > 0.5 else "predicted"
+
             speaker_info = SpeakerInfo(
                 label=label_map[best_speaker],
                 confidence=confidence,

@@ -1,0 +1,41 @@
+Implement Speaker Attribution v2 — Unit 3 for repo `youtube-transcripter`.
+
+Repo:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+
+Linked local spec id:
+openspec-local-speaker-attribution-v2-real-diarization-20260328
+
+Primary OpenSpec change:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter/openspec/changes/speaker-attribution-v2-real-diarization/
+
+Task scope:
+Unit 3 — Alignment + long-video ambiguity hardening
+
+Prerequisite status:
+- Unit 1 strategy seam is complete and committed.
+- Unit 2 real post-hoc backend (`pyannote_v1`) is complete and committed.
+
+Goal:
+Harden transcript-segment alignment and long-video chunk-boundary ambiguity behavior so the real diarization path is conservative, reviewable, and trustworthy.
+
+In scope:
+1. Improve transcript-segment ↔ speaker-turn alignment behavior if needed
+2. Harden ambiguity semantics for weak overlap / uncertain assignment
+3. Strengthen long-video chunk-boundary handling for real diarization output
+4. Prefer downgraded confidence / `unknown` over false continuity
+5. Add/update tests around ambiguous boundaries and long-video behavior
+6. Run relevant validation/tests
+
+Constraints:
+- Do NOT add named speaker / Host-Guest inference
+- Do NOT add auto-routing across strategies
+- Do NOT broaden into docs/UX polish beyond what is strictly needed
+- Do NOT touch unrelated backup/deployment code
+- Keep this unit focused on trustworthiness of alignment behavior
+
+Expected deliverable:
+- more conservative and explicit long-video ambiguity handling
+- alignment behavior is clearer and less likely to imply false certainty
+- tests/validation pass
+- concise summary of ambiguity policy and what remains for Unit 4
