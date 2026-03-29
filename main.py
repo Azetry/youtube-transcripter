@@ -252,15 +252,25 @@ def main():
         action="store_true",
         dest="speaker_attribution",
         help="Enable speaker attribution (experimental). Assigns generic labels "
-        "(Speaker A/B/C) to transcript segments.",
+        "(Speaker A/B/C) to transcript segments using the default pause-based "
+        "heuristic. For real diarization, use --speaker-strategy instead.",
     )
     parser.add_argument(
         "--speaker-strategy",
         default=None,
         dest="speaker_strategy",
-        help="Speaker attribution strategy: 'pause_heuristic_v1' (default) or "
-        "'pyannote_v1' (real diarization, requires pyannote.audio + "
-        "PYANNOTE_AUTH_TOKEN). Implies --speaker-attribution.",
+        help="Select a speaker attribution strategy (implies --speaker-attribution). "
+        "Options: 'pause_heuristic_v1' — fast, text-only, detects turns at "
+        "silence gaps (default); 'pyannote_v1' — real audio diarization, higher "
+        "accuracy, requires pyannote.audio and PYANNOTE_AUTH_TOKEN env var. "
+        "Use --list-speaker-strategies for details.",
+    )
+    parser.add_argument(
+        "--list-speaker-strategies",
+        action="store_true",
+        dest="list_speaker_strategies",
+        help="Print available speaker attribution strategies with descriptions "
+        "and exit.",
     )
     parser.add_argument(
         "-o", "--output",
@@ -269,6 +279,20 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # --list-speaker-strategies: print and exit
+    if args.list_speaker_strategies:
+        from src.transcript.speaker_attribution import (
+            DEFAULT_STRATEGY,
+            describe_strategies,
+        )
+        descriptions = describe_strategies()
+        console.print("[bold]Available speaker attribution strategies:[/bold]\n")
+        for sid, desc in sorted(descriptions.items()):
+            default_tag = " [dim](default)[/dim]" if sid == DEFAULT_STRATEGY else ""
+            console.print(f"  [cyan]{sid}[/cyan]{default_tag}")
+            console.print(f"    {desc}\n")
+        return
 
     # 檢查 API Key
     if not os.getenv("OPENAI_API_KEY"):

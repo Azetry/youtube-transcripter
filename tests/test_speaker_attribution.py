@@ -27,6 +27,7 @@ from src.transcript.speaker_attribution import (
     _align_segments_to_turns,
     attribute_speakers,
     count_speakers,
+    describe_strategies,
     get_strategy,
     list_strategies,
     segments_to_dicts,
@@ -425,6 +426,20 @@ class TestStrategyRegistry:
         strategies = list_strategies()
         assert "pause_heuristic_v1" in strategies
         assert "pyannote_v1" in strategies
+
+    def test_describe_strategies_returns_all(self):
+        descriptions = describe_strategies()
+        assert set(descriptions.keys()) == set(list_strategies())
+        for sid, desc in descriptions.items():
+            assert isinstance(desc, str)
+            assert len(desc) > 20  # non-trivial description
+
+    def test_describe_strategies_mentions_requirements(self):
+        descriptions = describe_strategies()
+        # Pyannote description should mention auth token requirement
+        assert "PYANNOTE_AUTH_TOKEN" in descriptions["pyannote_v1"]
+        # Heuristic description should indicate no extra dependencies
+        assert "no extra dependencies" in descriptions["pause_heuristic_v1"].lower()
 
 
 # ── Alignment helper tests ────────────────────────────────────────

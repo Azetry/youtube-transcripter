@@ -1,0 +1,41 @@
+Implement Speaker Attribution v2 — Unit 4 for repo `youtube-transcripter`.
+
+Repo:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+
+Linked local spec id:
+openspec-local-speaker-attribution-v2-real-diarization-20260328
+
+Primary OpenSpec change:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter/openspec/changes/speaker-attribution-v2-real-diarization/
+
+Task scope:
+Unit 4 — Operator surface + docs + golden-sample validation scaffolding
+
+Prerequisite status:
+- Unit 1 strategy seam is complete and committed.
+- Unit 2 real post-hoc backend is complete and committed.
+- Unit 3 alignment / ambiguity hardening is complete and committed.
+
+Goal:
+Polish operator-facing strategy selection/documentation and add lightweight golden-sample validation scaffolding, without broadening the product surface or adding auto-routing.
+
+In scope:
+1. Review CLI/API/operator-facing speaker strategy surface for clarity
+2. Improve docs/help text where needed so heuristic vs real diarization is understandable
+3. Add lightweight golden-sample validation / scorecard scaffolding if practical
+4. Keep the interface explicit and operator-controlled
+5. Run relevant validation/tests
+
+Constraints:
+- Do NOT add named speaker / Host-Guest inference
+- Do NOT add auto-routing or provider-routing policy
+- Do NOT redesign the whole product surface
+- Do NOT touch unrelated backup/deployment code
+- Keep this unit focused on operator clarity and repeatable validation
+
+Expected deliverable:
+- clearer operator-facing strategy/docs surface
+- some repeatable golden-sample validation scaffolding or scorecard hook
+- validation/tests pass
+- concise summary of what was polished and how to use/validate it

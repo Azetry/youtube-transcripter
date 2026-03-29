@@ -5,7 +5,7 @@ Strategy abstraction (v2):
     - ``AttributionResult`` — structured output from any strategy
     - ``PauseHeuristicStrategy`` — pause-based heuristic (default/fallback)
     - ``PyannoteStrategy`` — real post-hoc diarization via pyannote.audio
-    - ``get_strategy`` / ``list_strategies`` — registry helpers
+    - ``get_strategy`` / ``list_strategies`` / ``describe_strategies`` — registry helpers
     - ``DEFAULT_STRATEGY`` — identifier of the default strategy
 
 Backward-compatible helpers (v1 surface):
@@ -398,6 +398,20 @@ _REGISTRY: dict[str, type[SpeakerAttributionStrategy]] = {
     PYANNOTE_STRATEGY_ID: PyannoteStrategy,  # type: ignore[dict-item]
 }
 
+_STRATEGY_DESCRIPTIONS: dict[str, str] = {
+    STRATEGY_ID: (
+        "Pause-based heuristic. Detects speaker changes at silence gaps >= 2s. "
+        "Fast, no extra dependencies. Accuracy: low (best-effort labels). "
+        "Use for: quick speaker segmentation when diarization quality is not critical."
+    ),
+    PYANNOTE_STRATEGY_ID: (
+        "Real diarization via pyannote.audio (model: pyannote/speaker-diarization-3.1). "
+        "Requires: pip install pyannote.audio + PYANNOTE_AUTH_TOKEN env var "
+        "(Hugging Face token with model access). "
+        "Accuracy: high for 2-3 speaker interviews/podcasts. Slower than heuristic."
+    ),
+}
+
 
 def get_strategy(name: str | None = None) -> SpeakerAttributionStrategy:
     """Return a strategy instance by name.
@@ -423,6 +437,11 @@ def get_strategy(name: str | None = None) -> SpeakerAttributionStrategy:
 def list_strategies() -> list[str]:
     """Return sorted list of registered strategy identifiers."""
     return sorted(_REGISTRY)
+
+
+def describe_strategies() -> dict[str, str]:
+    """Return a mapping of strategy id to human-readable description."""
+    return dict(_STRATEGY_DESCRIPTIONS)
 
 
 # ---------------------------------------------------------------------------
