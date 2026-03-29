@@ -28,3 +28,7 @@
 ## 6. Validation
 
 - [x] 6.1 Run `openspec validate --changes` for this change after spec files are final.
+
+---
+
+**Archived:** merged into `openspec/specs/job-orchestration/spec.md` on 2026-03-29.
