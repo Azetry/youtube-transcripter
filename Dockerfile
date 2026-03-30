@@ -15,6 +15,25 @@ COPY requirements.txt .
 # 安裝 Python 依賴
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 選用：說話者分段（pyannote）額外套件 — 與 requirements-speaker-{cpu,gpu}.txt 一致
+# Build: --build-arg SPEAKER_PROFILE=none|cpu|gpu（預設 none，映像最小）
+ARG SPEAKER_PROFILE=none
+COPY requirements-speaker-cpu.txt requirements-speaker-gpu.txt ./
+RUN set -eux; \
+    case "$SPEAKER_PROFILE" in \
+      none) \
+        echo "SPEAKER_PROFILE=none: skipping PyTorch/pyannote speaker stack" ;; \
+      cpu) \
+        pip install --no-cache-dir -r requirements-speaker-cpu.txt ;; \
+      gpu) \
+        pip install --no-cache-dir -r requirements-speaker-gpu.txt ;; \
+      *) \
+        echo "SPEAKER_PROFILE must be none, cpu, or gpu (got: ${SPEAKER_PROFILE})" >&2; \
+        exit 1 ;; \
+    esac
+
+ENV SPEAKER_PROFILE=${SPEAKER_PROFILE}
+
 # 複製應用程式碼
 COPY main.py ./
 COPY src/ ./src/

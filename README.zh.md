@@ -59,7 +59,39 @@ docker compose up -d
 
 前往： http://localhost:3000
 
-預設 Docker 後端映像僅安裝 **`requirements.txt`**（走 Whisper API，不含 PyTorch／pyannote）。若要使用 **pyannote** 分段，請在本機用 CLI 安裝 speaker 額外套件（見下節「說話者標註」），或自行擴充 Dockerfile。
+預設 Docker 後端映像僅安裝 **`requirements.txt`**（走 Whisper API，不含 PyTorch／pyannote）。
+
+### Docker 說話者建置設定（SPEAKER_PROFILE）
+
+可選的 **`SPEAKER_PROFILE`** 建置參數會疊加與本機 CLI 相同的檔案：`requirements-speaker-cpu.txt` 或 `requirements-speaker-gpu.txt`。預設為 **`none`**（映像最小、建置最快）。
+
+| 設定 | 說明 |
+|------|------|
+| `none` | 僅基礎 `requirements.txt`（`docker compose build` 預設）。 |
+| `cpu` | 加上 CPU 版 PyTorch 與 `pyannote.audio`（映像大、首次建置久）。 |
+| `gpu` | 加上 CUDA 取向的 PyTorch 與 `pyannote.audio`。若主機 CUDA 不同，請調整 `requirements-speaker-gpu.txt` 內 index。執行時需搭配 NVIDIA Container Toolkit／`--gpus` 等。 |
+
+**Compose：** 在 `.env` 設定（見 `.env.example`）後重建後端：
+
+```bash
+export SPEAKER_PROFILE=cpu
+docker compose build --no-cache backend
+docker compose up -d
+```
+
+**純 docker build：**
+
+```bash
+docker build --build-arg SPEAKER_PROFILE=cpu -t yt-backend-cpu .
+```
+
+在容器內使用 **`pyannote_v1`** 時，請在 `.env` 設定 **`PYANNOTE_AUTH_TOKEN`**，並在 Hugging Face 同意各 gated 模型；依你們部署方式將該變數傳入 backend 容器。
+
+**GPU 驗證**（`SPEAKER_PROFILE=gpu` 且具 GPU 存取時）：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend python -c "import torch; print('cuda:', torch.cuda.is_available())"
+```
 
 ## 說話者標註（多人／分段）
 

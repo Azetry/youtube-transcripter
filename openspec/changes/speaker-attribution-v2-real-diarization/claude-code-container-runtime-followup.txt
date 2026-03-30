@@ -1,0 +1,35 @@
+Implement a small container-runtime support follow-up for speaker attribution in repo `youtube-transcripter`.
+
+Repo:
+/home/ubuntu/.openclaw/workspace/repos/youtube-transcripter
+
+Linked local spec id:
+openspec-local-speaker-attribution-v2-real-diarization-20260328
+
+Context:
+- Speaker attribution repo code is implemented.
+- CPU/GPU requirements have been split.
+- Current gap is container/runtime ergonomics, not product architecture.
+
+Goal:
+Add explicit container runtime support for base / speaker-cpu / speaker-gpu paths while keeping the default image lightweight and backward compatible.
+
+In scope:
+1. Dockerfile support for base vs speaker-cpu vs speaker-gpu dependency paths
+2. docker-compose/runtime wiring for explicit runtime selection
+3. environment variable wiring for `PYANNOTE_AUTH_TOKEN`
+4. minimal docs/operator guidance updates
+5. keep default/base path backward compatible
+6. run relevant validation/tests
+
+Constraints:
+- Do NOT redesign speaker attribution architecture
+- Do NOT add new diarization backends
+- Do NOT add auto-routing logic
+- Do NOT touch unrelated backup/deployment areas beyond what container runtime support truly needs
+
+Expected deliverable:
+- explicit runtime support for base / CPU / GPU speaker modes
+- default image remains lightweight
+- operator can understand how to run each mode
+- validation/tests pass

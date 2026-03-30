@@ -59,7 +59,50 @@ docker compose up -d
 
 Open browser at http://localhost:3000
 
-The default backend image installs **only** `requirements.txt` (Whisper API path, no PyTorch/pyannote). For **pyannote** diarization, use a **local CLI** install with the speaker extras (see [Speaker attribution](#speaker-attribution)) or extend the Dockerfile yourself.
+The default backend image installs **only** `requirements.txt` (Whisper API path, no PyTorch/pyannote).
+
+### Docker speaker profiles
+
+Optional **`SPEAKER_PROFILE`** build argument layers the same files used for local CLI installs: `requirements-speaker-cpu.txt` or `requirements-speaker-gpu.txt`. Default is **`none`** (smallest image, fastest build).
+
+| Profile | Meaning |
+|---------|---------|
+| `none` | Base `requirements.txt` only (default for `docker compose build`). |
+| `cpu` | Adds CPU PyTorch + `pyannote.audio` (large image; long first build). |
+| `gpu` | Adds CUDA-oriented PyTorch + `pyannote.audio`. Adjust index URLs in `requirements-speaker-gpu.txt` if your CUDA stack differs. Run with NVIDIA Container Toolkit / `--gpus` as appropriate. |
+
+**Compose:** set in `.env` (see `.env.example`), then rebuild:
+
+```bash
+# Example: CPU speaker stack inside the backend container
+export SPEAKER_PROFILE=cpu
+docker compose build --no-cache backend
+docker compose up -d
+```
+
+**Plain Docker:**
+
+```bash
+docker build --build-arg SPEAKER_PROFILE=cpu -t yt-backend-cpu .
+```
+
+For **`pyannote_v1`** in containers, set **`PYANNOTE_AUTH_TOKEN`** in `.env` (and accept gated models on Hugging Face). The token is passed through to the backend container automatically via `docker-compose.yml`.
+
+#### Running each mode
+
+| Mode | Build | Run |
+|------|-------|-----|
+| **Base** (default) | `docker compose build backend` | `docker compose up -d` |
+| **Speaker CPU** | `SPEAKER_PROFILE=cpu docker compose build --no-cache backend` | `docker compose up -d` |
+| **Speaker GPU** | `SPEAKER_PROFILE=gpu docker compose build --no-cache backend` | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d` |
+
+The GPU override file (`docker-compose.gpu.yml`) reserves an NVIDIA GPU device for the backend container. It requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on the host.
+
+**GPU check** (after building with `SPEAKER_PROFILE=gpu` and running with GPU access):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend python -c "import torch; print('cuda:', torch.cuda.is_available())"
+```
 
 ## Speaker attribution
 

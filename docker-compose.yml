@@ -4,9 +4,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # none = 僅 requirements.txt（預設）；cpu / gpu = 安裝 pyannote 額外套件（映像較大、建置較久）
+        SPEAKER_PROFILE: ${SPEAKER_PROFILE:-none}
     container_name: yt-transcripter-backend
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SPEAKER_PROFILE=${SPEAKER_PROFILE:-none}
+      - PYANNOTE_AUTH_TOKEN=${PYANNOTE_AUTH_TOKEN:-}
+      - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - ./downloads:/app/downloads
       - ./transcripts:/app/transcripts
