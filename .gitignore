@@ -22,6 +22,10 @@ transcripts/*
 !downloads/.gitkeep
 !transcripts/.gitkeep
 
+# Local auth secrets (yt-dlp cookies, etc.)
+secrets/*
+!secrets/.gitkeep
+
 # IDE
 .vscode/
 .idea/

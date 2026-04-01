@@ -57,7 +57,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Open browser at http://localhost:3000
+Open browser at http://localhost:3000 (default).
 
 The default backend image installs **only** `requirements.txt` (Whisper API path, no PyTorch/pyannote).
 
@@ -216,6 +216,27 @@ python main.py --help
 | `YT_DLP_COOKIES_FROM_BROWSER` | Browser name for cookie extraction | No |
 
 Copy `.env.example` to `.env` and edit; never commit real secrets.
+
+### Cookie file setup (Docker)
+
+For Docker Compose, the backend container maps the project `./secrets` directory to `/app/secrets` in the container:
+
+- Host path: `./secrets`
+- Container path: `/app/secrets`
+
+Recommended `.env` setting:
+
+```env
+YT_DLP_COOKIES_FILE=/app/secrets/www.youtube.com_cookies.txt
+```
+
+That means your actual file should exist at:
+
+```text
+./secrets/www.youtube.com_cookies.txt
+```
+
+If you run locally without Docker, `YT_DLP_COOKIES_FILE` can be an absolute host path instead.
 
 ### Running tests
 

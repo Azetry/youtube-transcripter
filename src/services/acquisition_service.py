@@ -144,10 +144,15 @@ def _build_ydl_overrides(mode: AcquisitionMode) -> dict:
     UNAUTHENTICATED: explicitly clear cookie options and use best-effort opts.
     COOKIE_FILE / COOKIE_BROWSER: delegate to YouTubeExtractor._build_auth_opts.
     """
+    runtime_opts = YouTubeExtractor._build_runtime_opts()
     if mode == AcquisitionMode.UNAUTHENTICATED:
-        return YouTubeExtractor._build_unauthenticated_opts()
+        opts = dict(runtime_opts)
+        opts.update(YouTubeExtractor._build_unauthenticated_opts())
+        return opts
     # For auth modes, let the extractor read env as normal
-    return YouTubeExtractor._build_auth_opts()
+    opts = dict(runtime_opts)
+    opts.update(YouTubeExtractor._build_auth_opts())
+    return opts
 
 
 class ThisHostAcquisitionService:

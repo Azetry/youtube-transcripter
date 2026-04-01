@@ -13,9 +13,14 @@ services:
       - SPEAKER_PROFILE=${SPEAKER_PROFILE:-none}
       - PYANNOTE_AUTH_TOKEN=${PYANNOTE_AUTH_TOKEN:-}
       - HF_TOKEN=${HF_TOKEN:-}
+      - YT_DLP_COOKIES_FILE=${YT_DLP_COOKIES_FILE:-}
+      - YT_DLP_COOKIES_FROM_BROWSER=${YT_DLP_COOKIES_FROM_BROWSER:-}
+      - YT_DLP_BROWSER_PROFILE=${YT_DLP_BROWSER_PROFILE:-}
+      - YT_DLP_BROWSER_CONTAINER=${YT_DLP_BROWSER_CONTAINER:-}
     volumes:
       - ./downloads:/app/downloads
       - ./transcripts:/app/transcripts
+      - ./secrets:/app/secrets
     expose:
       - "8000"
     restart: unless-stopped
@@ -32,7 +37,7 @@ services:
       dockerfile: Dockerfile
     container_name: yt-transcripter-frontend
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:80"
     depends_on:
       - backend
     restart: unless-stopped

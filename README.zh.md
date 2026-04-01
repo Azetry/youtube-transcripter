@@ -57,7 +57,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-前往： http://localhost:3000
+前往： http://localhost:3000（預設）。
 
 預設 Docker 後端映像僅安裝 **`requirements.txt`**（走 Whisper API，不含 PyTorch／pyannote）。
 
@@ -187,6 +187,27 @@ python main.py --help
 | `YT_DLP_COOKIES_FROM_BROWSER` | 從瀏覽器讀 cookies 的 browser 名稱 | No |
 
 請複製 `.env.example` 為 `.env` 後編輯；勿將真實金鑰提交至版本庫。
+
+### Cookie 檔設定（Docker）
+
+在 Docker Compose 中，backend 會把專案內 `./secrets` 對映到容器內 `/app/secrets`：
+
+- 主機路徑：`./secrets`
+- 容器路徑：`/app/secrets`
+
+建議 `.env` 設定：
+
+```env
+YT_DLP_COOKIES_FILE=/app/secrets/www.youtube.com_cookies.txt
+```
+
+代表你實際要放的檔案路徑是：
+
+```text
+./secrets/www.youtube.com_cookies.txt
+```
+
+若是非 Docker 的本機執行，`YT_DLP_COOKIES_FILE` 也可以直接填主機上的絕對路徑。
 
 ### 執行測試
 

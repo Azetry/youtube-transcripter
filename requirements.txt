@@ -16,6 +16,7 @@
 # - GPU requirements may need adjustment to match the machine's CUDA runtime.
 
 yt-dlp>=2024.1.0
+yt-dlp-ejs>=0.5.0
 openai>=1.0.0
 python-dotenv>=1.0.0
 rich>=13.0.0

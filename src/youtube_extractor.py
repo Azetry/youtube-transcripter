@@ -95,6 +95,14 @@ class YouTubeExtractor:
         os.makedirs(output_dir, exist_ok=True)
 
     @staticmethod
+    def _build_runtime_opts() -> dict:
+        """Return runtime options for modern YouTube JS challenge solving."""
+        return {
+            # yt-dlp/ejs does not always auto-detect node in containers.
+            "js_runtimes": {"node": {}},
+        }
+
+    @staticmethod
     def _build_unauthenticated_opts() -> dict:
         """Best-effort yt-dlp options for unauthenticated extraction.
 
@@ -150,13 +158,16 @@ class YouTubeExtractor:
     @staticmethod
     def _build_ydl_opts(**extra: object) -> dict:
         """Merge unauthenticated defaults, auth opts, and caller overrides."""
+        runtime_opts = YouTubeExtractor._build_runtime_opts()
         auth_opts = YouTubeExtractor._build_auth_opts()
         if auth_opts:
             # Auth configured — skip unauthenticated profile, use auth opts
-            base = auth_opts
+            base = dict(runtime_opts)
+            base.update(auth_opts)
         else:
             # No auth — use best-effort unauthenticated options
-            base = YouTubeExtractor._build_unauthenticated_opts()
+            base = dict(runtime_opts)
+            base.update(YouTubeExtractor._build_unauthenticated_opts())
         base.update(extra)
         return base
 
